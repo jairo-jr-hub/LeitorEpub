@@ -35,7 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ==========================================
-// 1. BIBLIOTECA (AGORA APENAS LIVROS E CAPAS)
+// 1. BIBLIOTECA (CARREGAMENTO E UPLOAD)
 // ==========================================
 async function carregarBiblioteca() {
     DOM.bookshelf.innerHTML = '';
@@ -58,7 +58,7 @@ async function carregarBiblioteca() {
             e.stopPropagation();
             if (confirm(`Excluir "${bookMeta.title}" do aplicativo?`)) {
                 await localforage.removeItem(bookMeta.id); 
-                localStorage.removeItem('cfi_' + bookMeta.id); // Apaga também o progresso salvo
+                localStorage.removeItem('cfi_' + bookMeta.id); // Limpa rastro da memória rápida
                 const nova = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', nova); 
                 carregarBiblioteca();
@@ -125,7 +125,7 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. MOTOR DE LEITURA E SALVAMENTO BLINDADO
+// 2. MOTOR DE LEITURA E SALVAMENTO BRUTAL
 // ==========================================
 async function abrirLivro(bookId) {
     currentBookId = bookId;
@@ -162,8 +162,17 @@ async function abrirLivro(bookId) {
 
         aplicarEstilosNoMotor();
         
-        // RECUPERAÇÃO NA MEMÓRIA RÁPIDA (LOCALSTORAGE)
-        const cfiSalvo = localStorage.getItem('cfi_' + bookId);
+        // 1. TENTA ACHAR A PÁGINA NA MEMÓRIA RÁPIDA (LOCALSTORAGE) PRIMEIRO
+        let cfiSalvo = localStorage.getItem('cfi_' + bookId);
+        
+        // 2. SE NÃO TIVER, TENTA NO BANCO LENTO
+        if (!cfiSalvo) {
+            const library = await localforage.getItem('library_metadata');
+            const bookMeta = library.find(b => b.id === bookId);
+            if (bookMeta && bookMeta.cfi) {
+                cfiSalvo = bookMeta.cfi;
+            }
+        }
         
         try {
             if (cfiSalvo) {
@@ -183,7 +192,7 @@ async function abrirLivro(bookId) {
         });
         gerarSumario();
 
-        // AUTO-SAVE AGRESSIVO: A cada virada de página ele grava no arquivo do iPhone
+        // AUTO-SAVE A CADA VIRADA DE PÁGINA
         rendition.on('relocated', (location) => {
             DOM.btnBookmark.classList.remove('saved');
             DOM.btnBookmark.textContent = '📍';
@@ -191,7 +200,7 @@ async function abrirLivro(bookId) {
                 currentLocationCfi = location.start.cfi;
                 atualizarProgresso(currentLocationCfi);
                 
-                // Grava imediatamente na memória síncrona
+                // Grava imediatamente na memória síncrona do iPhone
                 localStorage.setItem('cfi_' + currentBookId, currentLocationCfi);
             }
         });
@@ -202,26 +211,68 @@ async function abrirLivro(bookId) {
     }
 }
 
-// O BOTÃO DE SALVAR MANUAL (Pra quem gosta da segurança visual)
-DOM.btnBookmark.addEventListener('click', () => {
-    if (currentLocationCfi && currentBookId) {
-        localStorage.setItem('cfi_' + currentBookId, currentLocationCfi);
+// ==========================================
+// ESTRATÉGIA DE SALVAMENTO MANUAL BRUTAL
+// ==========================================
+DOM.btnBookmark.addEventListener('click', async () => {
+    // Pega a página exatamente do local onde está agora
+    const localizacaoExata = rendition.location ? rendition.location.start.cfi : currentLocationCfi;
+
+    if (localizacaoExata && currentBookId) {
+        // 1. Grava na memória rápida (Síncrona)
+        localStorage.setItem('cfi_' + currentBookId, localizacaoExata);
+        currentLocationCfi = localizacaoExata;
+        
+        // 2. Força a gravação no Banco de Dados (Assíncrona permanente)
+        const library = await localforage.getItem('library_metadata');
+        if (library) {
+            const bookIndex = library.findIndex(b => b.id === currentBookId);
+            if (bookIndex !== -1) {
+                library[bookIndex].cfi = localizacaoExata;
+                await localforage.setItem('library_metadata', library);
+            }
+        }
+
+        // 3. Feedback Visual de Sucesso
         DOM.btnBookmark.classList.add('saved');
         DOM.btnBookmark.textContent = '✔ Salvo';
+        
+        atualizarProgresso(localizacaoExata);
+    } else {
+        alert("Aguarde a página carregar completamente antes de salvar.");
     }
 });
 
-// EVENTO SECRETO PARA O iPHONE (Quando você minimiza ou bloqueia a tela)
-document.addEventListener("visibilitychange", () => {
+// SENSOR SECRETO DO IOS (Auto-Save quando minimiza o app ou bloqueia a tela)
+document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState === 'hidden' && currentBookId && currentLocationCfi) {
+        // Garante a gravação no mili-segundo que a tela apaga
         localStorage.setItem('cfi_' + currentBookId, currentLocationCfi);
+        
+        // Tenta gravar no banco permanente se o iOS der tempo
+        const library = await localforage.getItem('library_metadata');
+        if (library) {
+            const bookIndex = library.findIndex(b => b.id === currentBookId);
+            if (bookIndex !== -1) {
+                library[bookIndex].cfi = currentLocationCfi;
+                localforage.setItem('library_metadata', library); // Sem await para não travar
+            }
+        }
     }
 });
 
-function fecharLivro() {
-    // Ultima tentativa de salvar ao clicar em voltar
+async function fecharLivro() {
+    // Última tentativa de salvar ao clicar em Sair
     if (currentLocationCfi && currentBookId) {
         localStorage.setItem('cfi_' + currentBookId, currentLocationCfi);
+        const library = await localforage.getItem('library_metadata');
+        if (library) {
+            const bookIndex = library.findIndex(b => b.id === currentBookId);
+            if (bookIndex !== -1) {
+                library[bookIndex].cfi = currentLocationCfi;
+                await localforage.setItem('library_metadata', library);
+            }
+        }
     }
 
     if (book) { book.destroy(); book = null; rendition = null; }
@@ -236,7 +287,7 @@ function fecharLivro() {
 }
 
 // ==========================================
-// 3. NAVEGAÇÃO
+// 3. NAVEGAÇÃO E SUMÁRIO
 // ==========================================
 function gerarSumario() {
     book.loaded.navigation.then(nav => {
@@ -317,7 +368,7 @@ function aplicarEstilosNoMotor() {
             "text-align": `${settings.align} !important`,
             "line-height": `${settings.lineHeight} !important`,
             "color": `${textCor} !important`,
-            "padding": "0 20px !important" 
+            "padding": "60px 20px 60px 20px !important" 
         },
         "p": {
             "text-align": `${settings.align} !important`,
