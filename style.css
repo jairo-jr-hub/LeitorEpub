@@ -46,7 +46,7 @@ body { background: #f5f5f7; color: #333; overflow: hidden; touch-action: none; t
 .highlight-btn.saved { color: #34a853; }
 
 #progress-slider { flex: 1; accent-color: #1a73e8; }
-#progress-label { font-size: 13px; color: #666; font-variant-numeric: tabular-nums; font-weight: 600; min-width: 45px; text-align: right; }
+#progress-label { font-size: 12px; color: #666; font-weight: 600; min-width: 95px; text-align: right; }
 
 #touch-zones { position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; display: flex; z-index: 20; }
 #zone-left { width: 25%; } #zone-center { width: 50%; } #zone-right { width: 25%; }
