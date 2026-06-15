@@ -20,7 +20,7 @@ let rendition = null;
 let currentBookId = null;
 let currentLocationCfi = null; 
 
-let settings = JSON.parse(localStorage.getItem('reader_v4_configs')) || {
+let settings = JSON.parse(localStorage.getItem('reader_v5_configs')) || {
     font: "'Literata', serif",
     size: 100,
     lineHeight: 1.5,
@@ -30,16 +30,15 @@ let settings = JSON.parse(localStorage.getItem('reader_v4_configs')) || {
     paddingY: 60
 };
 
-// Alterar visualmente a versão no HTML para controle
 document.addEventListener('DOMContentLoaded', () => {
-    document.querySelector('header h1').innerHTML = 'Minha Biblioteca <span style="font-size: 12px; background: #fbbc05; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle;">v4 Estável</span>';
-    document.title = "Leitor EPUB PRO - v4";
+    document.querySelector('header h1').innerHTML = 'Minha Biblioteca <span style="font-size: 12px; background: #000; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle;">v5 Definitiva</span>';
+    document.title = "Leitor EPUB PRO - v5";
     carregarBiblioteca();
     carregarUIConfigs();
 });
 
 // ==========================================
-// 1. BIBLIOTECA (MANTÉM V2/V3)
+// 1. BIBLIOTECA (APENAS O ARQUIVO, SEM PROGRESSO AQUI)
 // ==========================================
 async function carregarBiblioteca() {
     DOM.bookshelf.innerHTML = '';
@@ -62,7 +61,7 @@ async function carregarBiblioteca() {
             e.stopPropagation();
             if (confirm(`Excluir "${bookMeta.title}" do aplicativo?`)) {
                 await localforage.removeItem(bookMeta.id); 
-                localStorage.removeItem('cfi_v4_' + bookMeta.id); 
+                localStorage.removeItem('epub_cfi_' + bookMeta.id); // Limpa a memória instantânea
                 const nova = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', nova); 
                 carregarBiblioteca();
@@ -129,7 +128,7 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. MOTOR DE LEITURA (V4 - O RETORNO AO CFI SEGURO)
+// 2. MOTOR DE LEITURA
 // ==========================================
 async function abrirLivro(bookId) {
     currentBookId = bookId;
@@ -167,15 +166,9 @@ async function abrirLivro(bookId) {
         aplicarEstilosNoMotor();
         gerarSumario();
         
-        // 1. Busca o CFI Salvo
-        let cfiSalvo = localStorage.getItem('cfi_v4_' + bookId);
-        if (!cfiSalvo) {
-            const library = await localforage.getItem('library_metadata');
-            const bookMeta = library.find(b => b.id === bookId);
-            if (bookMeta && bookMeta.cfi) cfiSalvo = bookMeta.cfi;
-        }
+        // RECUPERAÇÃO SÍNCRONA DA PÁGINA: Leitura imediata da memória rápida do iPhone
+        let cfiSalvo = localStorage.getItem('epub_cfi_' + bookId);
         
-        // 2. Transição Limpa e Direta (Nada de esperar gerar arrays enormes de páginas)
         try {
             if (cfiSalvo) {
                 await rendition.display(cfiSalvo);
@@ -184,26 +177,23 @@ async function abrirLivro(bookId) {
             }
             currentLocationCfi = rendition.location ? rendition.location.start.cfi : cfiSalvo;
         } catch(e) {
-            console.warn("CFI inválido ou motor alterado. Abrindo início do livro.");
             await rendition.display();
             currentLocationCfi = rendition.location ? rendition.location.start.cfi : null;
         }
 
-        // 3. Gera locais SOMENTE para a barra de progresso em background
         book.ready.then(() => {
             return book.locations.generate(1600);
         }).then(() => {
             atualizarProgressoVisual(currentLocationCfi);
         });
 
-        // 4. Virada de página: Salva CFI e atualiza %
+        // Evento de Virada de Página (Sincroniza apenas o botão e o rastreador)
         rendition.on('relocated', (location) => {
             DOM.btnBookmark.classList.remove('saved');
             DOM.btnBookmark.textContent = '📍';
             if (location && location.start) {
                 currentLocationCfi = location.start.cfi;
                 atualizarProgressoVisual(currentLocationCfi);
-                localStorage.setItem('cfi_v4_' + currentBookId, currentLocationCfi);
             }
         });
 
@@ -214,56 +204,40 @@ async function abrirLivro(bookId) {
 }
 
 // ==========================================
-// SALVAMENTO MANUAL ABSOLUTO V4
+// A LÓGICA DE SALVAR "BURRA E FUNCIONAL"
 // ==========================================
-DOM.btnBookmark.addEventListener('click', async () => {
-    // Busca a posição viva do motor
-    const localizacaoExata = rendition.location ? rendition.location.start.cfi : currentLocationCfi;
+DOM.btnBookmark.addEventListener('click', () => {
+    // 1. Extrai a página ativa com segurança
+    let locExata = null;
+    if (rendition && rendition.location && rendition.location.start) {
+        locExata = rendition.location.start.cfi;
+    } else {
+        locExata = currentLocationCfi;
+    }
 
-    if (localizacaoExata && currentBookId) {
-        localStorage.setItem('cfi_v4_' + currentBookId, localizacaoExata);
-        currentLocationCfi = localizacaoExata;
+    if (locExata && currentBookId) {
+        // 2. Salva APENAS na memória instantânea do navegador. 
+        // Não tem 'await', não tem atraso. O iOS não consegue interromper isso.
+        localStorage.setItem('epub_cfi_' + currentBookId, locExata);
         
-        const library = await localforage.getItem('library_metadata');
-        if (library) {
-            const bookIndex = library.findIndex(b => b.id === currentBookId);
-            if (bookIndex !== -1) {
-                library[bookIndex].cfi = localizacaoExata;
-                await localforage.setItem('library_metadata', library);
-            }
-        }
-
+        currentLocationCfi = locExata;
         DOM.btnBookmark.classList.add('saved');
         DOM.btnBookmark.textContent = '✔ Salvo';
+    } else {
+        alert("Aguarde a página carregar completamente antes de salvar.");
     }
 });
 
-// Auto-Save de emergência
-document.addEventListener("visibilitychange", async () => {
+// Auto-Save instantâneo (Garante que se você fechar sem clicar, ele executa a mesma lógica acima)
+document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === 'hidden' && currentBookId && currentLocationCfi) {
-        localStorage.setItem('cfi_v4_' + currentBookId, currentLocationCfi);
-        const library = await localforage.getItem('library_metadata');
-        if (library) {
-            const bookIndex = library.findIndex(b => b.id === currentBookId);
-            if (bookIndex !== -1) {
-                library[bookIndex].cfi = currentLocationCfi;
-                localforage.setItem('library_metadata', library);
-            }
-        }
+        localStorage.setItem('epub_cfi_' + currentBookId, currentLocationCfi);
     }
 });
 
-async function fecharLivro() {
+function fecharLivro() {
     if (currentBookId && currentLocationCfi) {
-        localStorage.setItem('cfi_v4_' + currentBookId, currentLocationCfi);
-        const library = await localforage.getItem('library_metadata');
-        if (library) {
-            const bookIndex = library.findIndex(b => b.id === currentBookId);
-            if (bookIndex !== -1) {
-                library[bookIndex].cfi = currentLocationCfi;
-                await localforage.setItem('library_metadata', library);
-            }
-        }
+        localStorage.setItem('epub_cfi_' + currentBookId, currentLocationCfi);
     }
 
     if (book) { book.destroy(); book = null; rendition = null; }
@@ -329,9 +303,8 @@ DOM.progressSlider.addEventListener('change', (e) => {
 });
 
 // ==========================================
-// 4. MOTOR DE ESTILIZAÇÃO (REFEITO PARA SER INSTANTÂNEO)
+// 4. MOTOR DE ESTILIZAÇÃO E LAYOUT TRAVADO
 // ==========================================
-
 async function alterarConfiguracaoLayout(callback) {
     const cfiAtual = rendition.currentLocation() ? rendition.currentLocation().start.cfi : currentLocationCfi;
     
@@ -339,7 +312,6 @@ async function alterarConfiguracaoLayout(callback) {
     carregarUIConfigs();
     salvarConfigs(); 
     
-    // Na V4, como a margem é tratada pelo CSS (100dvh), ele repagina o IFRAME de forma levíssima
     if (cfiAtual && rendition) {
         await rendition.display(cfiAtual);
     }
@@ -391,7 +363,7 @@ function aplicarEstilosNoMotor() {
 }
 
 function salvarConfigs() {
-    localStorage.setItem('reader_v4_configs', JSON.stringify(settings));
+    localStorage.setItem('reader_v5_configs', JSON.stringify(settings));
     aplicarEstilosNoMotor();
 }
 
@@ -457,7 +429,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
-// Ações dos Controles com V4 Trava de Layout
+// Ações dos Controles
 document.querySelectorAll('.font-btn').forEach(btn => { 
     btn.addEventListener('click', (e) => { 
         alterarConfiguracaoLayout(() => { settings.font = e.currentTarget.dataset.font; }); 
