@@ -27,9 +27,9 @@ function fecharMenus() {
     tocModal.classList.add('hidden');
 }
 
-// --- SALVAMENTO AUTOMÁTICO REFORÇADO ---
+// --- SALVAMENTO ROBUSTO (Manual e Automático) ---
 async function salvarPosicao(cfi) {
-    if (!currentBookId) return;
+    if (!currentBookId || !cfi) return;
     try {
         const library = await localforage.getItem('library_metadata') || [];
         const bookIndex = library.findIndex(b => b.id === currentBookId);
@@ -38,7 +38,7 @@ async function salvarPosicao(cfi) {
             await localforage.setItem('library_metadata', library);
         }
     } catch (e) {
-        console.error("Erro ao salvar progresso automaticamente:", e);
+        console.error("Erro ao salvar progresso:", e);
     }
 }
 
@@ -48,7 +48,7 @@ async function loadLibrary() {
     const library = await localforage.getItem('library_metadata') || [];
     
     if (library.length === 0) {
-        bookshelf.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #666; margin-top: 20px;">Nenhum livro salvo. Adicione um arquivo EPUB.</p>';
+        bookshelf.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #666; margin-top: 20px;">Nenhum livro salvo.</p>';
         return;
     }
 
@@ -139,17 +139,17 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
-        rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
-        rendition.themes.register("sepia", { "body": { "background": "#fefbec !important", "color": "#5e4e43 !important" }});
-        rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
+        // Registrar os temas vazios e aplicar cores dinâmicas via JS Injection
+        rendition.themes.register("light", { "body": { "background": "#ffffff !important" }});
+        rendition.themes.register("sepia", { "body": { "background": "#fefbec !important" }});
+        rendition.themes.register("dark", { "body": { "background": "#121212 !important" }});
         
         rendition.themes.select(readerSettings.theme);
         rendition.themes.fontSize(readerSettings.fontSize + "%");
         
-        if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
-
+        // Dispara o injeção de estilo avançado sempre que um novo capítulo é desenhado
         rendition.hooks.content.register((contents) => {
-            atualizarStylesInjetados(); 
+            aplicarEstilosNoConteudo(contents);
         });
 
         aplicarConfiguracoesDinamicas();
@@ -185,7 +185,6 @@ async function openBook(bookId) {
                     }
                 });
             };
-            
             if (nav.toc) generateToc(nav.toc);
         });
 
@@ -194,23 +193,21 @@ async function openBook(bookId) {
         }).then(() => {
             if(rendition.location) {
                 const percentage = currentBook.locations.percentageFromCfi(rendition.location.start.cfi);
-                const percentRounded = Math.round(percentage * 100);
-                document.getElementById('progress-slider').value = percentRounded;
-                document.getElementById('page-info').textContent = `${percentRounded}%`;
+                document.getElementById('progress-slider').value = Math.round(percentage * 100);
+                document.getElementById('page-info').textContent = `${Math.round(percentage * 100)}%`;
             }
         });
 
-        // Evento reativo de virada de página: salva na hora
+        // Vínculo reativo da virada de página (Desmarca botão manual e executa Auto-Save)
         rendition.on('relocated', async (location) => {
+            document.getElementById('btn-bookmark').classList.remove('saved'); // Apaga o marcador ao mudar de página
             if (location && location.start && location.start.cfi) {
-                await salvarPosicao(location.start.cfi);
+                await salvarPosicao(location.start.cfi); // Executa o salvamento automático invisível
             }
-            
             if(currentBook.locations.length > 0) {
                 const percentage = currentBook.locations.percentageFromCfi(location.start.cfi);
-                const percentRounded = Math.round(percentage * 100);
-                document.getElementById('progress-slider').value = percentRounded;
-                document.getElementById('page-info').textContent = `${percentRounded}%`;
+                document.getElementById('progress-slider').value = Math.round(percentage * 100);
+                document.getElementById('page-info').textContent = `${Math.round(percentage * 100)}%`;
             }
         });
 
@@ -243,6 +240,14 @@ function initUIEvents() {
 
     document.getElementById('btn-back').addEventListener('click', fecharLivro);
     
+    // Botão Marcador (Manual Save)
+    document.getElementById('btn-bookmark').addEventListener('click', async () => {
+        if (rendition && rendition.location && rendition.location.start) {
+            await salvarPosicao(rendition.location.start.cfi);
+            document.getElementById('btn-bookmark').classList.add('saved'); // Fica Azul
+        }
+    });
+
     document.getElementById('btn-aa').addEventListener('click', () => {
         tocModal.classList.add('hidden');
         settingsModal.classList.toggle('hidden');
@@ -311,90 +316,95 @@ function aplicarConfiguracoesDinamicas() {
     }
 
     rendition.themes.fontSize(readerSettings.fontSize + "%");
-    atualizarStylesInjetados();
+    
+    // Re-aplica estilos em todas as iframes ativas na mudança de configuração
+    if (rendition.getContents) {
+        rendition.getContents().forEach(content => aplicarEstilosNoConteudo(content));
+    }
+    
     aplicarBrilho();
 }
 
-function atualizarStylesInjetados() {
-    if (!rendition) return;
-    
-    const bgColors = { 'light': '#ffffff', 'sepia': '#fefbec', 'dark': '#121212' };
+// --- O NOVO MOTOR CIENTÍFICO (SEM ACHISMOS) ---
+function aplicarEstilosNoConteudo(content) {
+    const doc = content.document;
+
+    // 1. Injeção de Fontes
+    if (!doc.getElementById('literata-font-import')) {
+        const fontLink = doc.createElement('link');
+        fontLink.id = 'literata-font-import';
+        fontLink.rel = 'stylesheet';
+        fontLink.href = 'https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap';
+        doc.head.appendChild(fontLink);
+    }
+
+    // 2. Caçador de Primeiro Parágrafo com JS (Resolve definitivamente o problema do Small Caps)
+    const paragraphs = doc.querySelectorAll('p');
+    for (let i = 0; i < paragraphs.length; i++) {
+        // Encontra o primeiro parágrafo que seja realmente texto (não vazio ou apenas espaço/imagem)
+        if (paragraphs[i].textContent.trim().length > 5) {
+            paragraphs[i].classList.add('epub-primeiro-paragrafo');
+            break; // Aplica a classe e sai do loop
+        }
+    }
+
+    // 3. Matriz de Cores e Força Bruta
+    let style = doc.getElementById('epub-dynamic-styles');
+    if (!style) {
+        style = doc.createElement('style');
+        style.id = 'epub-dynamic-styles';
+        doc.head.appendChild(style);
+    }
+
     const textColors = { 'light': '#000000', 'sepia': '#5e4e43', 'dark': '#e0e0e0' };
+    const highlightColors = { 'light': '#000000', 'sepia': '#21160e', 'dark': '#ffffff' }; // Cor forte (#21160e) para Destaques
     
-    // Cor de destaque forte da primeira linha do capítulo para o tema Sépia
-    const firstPhraseColor = readerSettings.theme === 'sepia' ? '#21160e' : textColors[readerSettings.theme];
-    const currentColor = textColors[readerSettings.theme];
+    const currentText = textColors[readerSettings.theme];
+    const currentHighlight = highlightColors[readerSettings.theme];
     
-    const isLiterata = readerSettings.fontFamily.includes('Literata');
     const fontToApply = readerSettings.fontFamily !== 'Original' ? `font-family: ${readerSettings.fontFamily} !important;` : '';
-    
+    const isLiterata = readerSettings.fontFamily.includes('Literata');
     const literataFixNorm = isLiterata ? 'font-variation-settings: "opsz" 14, "wght" 400 !important;' : '';
     const literataFixBold = isLiterata ? 'font-variation-settings: "opsz" 14, "wght" 700 !important;' : '';
 
-    try {
-        rendition.getContents().forEach(content => {
-            if (!content.document.getElementById('literata-font-import')) {
-                const fontLink = content.document.createElement('link');
-                fontLink.id = 'literata-font-import';
-                fontLink.rel = 'stylesheet';
-                fontLink.href = 'https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap';
-                content.document.head.appendChild(fontLink);
-            }
+    style.innerHTML = `
+        body {
+            padding: calc(40px + env(safe-area-inset-top)) 20px calc(80px + env(safe-area-inset-bottom)) 20px !important; 
+            margin: 0 !important; 
+            background-color: transparent !important;
+            -webkit-font-smoothing: antialiased !important;
+            text-rendering: optimizeLegibility !important;
+        }
+        
+        /* Coringa (*): Esmaga QUALQUER cor ditada pelo livro e impõe a nossa cor Padrão */
+        body * {
+            color: ${currentText} !important;
+            ${fontToApply}
+        }
 
-            let style = content.document.getElementById('epub-dynamic-styles');
-            if (!style) {
-                style = content.document.createElement('style');
-                style.id = 'epub-dynamic-styles';
-                content.document.head.appendChild(style);
-            }
+        /* Garante que o texto normal seja fino (Peso 400) */
+        p, div, li, body {
+            font-weight: 400 !important;
+            ${literataFixNorm}
+        }
 
-            style.innerHTML = `
-                body {
-                    padding: calc(40px + env(safe-area-inset-top)) 20px calc(80px + env(safe-area-inset-bottom)) 20px !important; 
-                    margin: 0 !important; 
-                    background-color: transparent !important;
-                    -webkit-font-smoothing: antialiased !important;
-                    -moz-osx-font-smoothing: grayscale !important;
-                    text-rendering: optimizeLegibility !important;
-                }
-                
-                body, p, span, div, li, a {
-                    color: ${currentColor} !important;
-                    ${fontToApply}
-                }
+        /* Recupera e Protege os Títulos/Negritos com a Cor Forte/Destaque */
+        h1, h2, h3, h4, h5, h6, b, strong {
+            font-weight: 700 !important;
+            color: ${currentHighlight} !important;
+            ${literataFixBold}
+        }
 
-                h1, h2, h3, h4, h5, h6 {
-                    font-weight: 700 !important;
-                    color: ${firstPhraseColor} !important;
-                    ${fontToApply}
-                    ${literataFixBold}
-                }
-                
-                p, div, li, body {
-                    font-weight: 400 !important;
-                    ${literataFixNorm}
-                }
-                
-                b, strong {
-                    font-weight: 700 !important;
-                    color: ${firstPhraseColor} !important;
-                    ${literataFixBold}
-                }
-
-                /* FORÇA BRUTA: Aplica o estilo na primeira frase/linha do capítulo com cor mais forte */
-                p:first-of-type::first-line,
-                body > p:first-of-type,
-                body > div > p:first-of-type {
-                    font-weight: 700 !important;
-                    font-variant: small-caps !important;
-                    text-transform: lowercase !important;
-                    letter-spacing: 0.5px !important;
-                    color: ${firstPhraseColor} !important;
-                    ${literataFixBold}
-                }
-            `;
-        });
-    } catch(e) { console.warn("Erro ao injetar estilos pesados", e); }
+        /* ESTILO DA PRIMEIRA FRASE GARANTIDO PELO JS CAÇADOR */
+        .epub-primeiro-paragrafo {
+            font-weight: 700 !important;
+            color: ${currentHighlight} !important;
+            font-variant: small-caps !important;
+            text-transform: lowercase !important;
+            letter-spacing: 0.5px !important;
+            ${literataFixBold}
+        }
+    `;
 }
 
 function aplicarBrilho() {
