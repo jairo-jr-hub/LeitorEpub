@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="theme-color" id="theme-color-meta" content="#FDF7EC">
-    <title>Leitor EPUB PRO VERSAO CORRIGIDA - v7</title>
+    <title>Leitor EPUB PRO - Final</title>
     
     <link rel="stylesheet" href="style.css">
 
@@ -21,7 +21,7 @@
 
     <div id="library-view">
         <header>
-            <h1>Biblioteca <span style="font-size: 12px; background: #ea4335; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle;">v6 Mestre</span></h1>
+            <h1>Biblioteca <span style="font-size: 12px; background: #000; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle;">FINAL</span></h1>
             <label class="upload-btn" id="upload-label">
                 + Adicionar Livro
                 <input type="file" id="file-input" accept=".epub" style="display: none;" />
@@ -33,13 +33,14 @@
     <div id="reader-view" class="hidden">
         
         <div id="top-bar" class="ui-bar hidden">
-            <button id="btn-back" class="icon-btn">‹ Sair</button>
-            <div class="top-bar-center">
-                <button id="btn-open-toc" class="icon-btn toc-trigger">☰ Capítulos</button>
-            </div>
+            <button id="btn-back" class="icon-btn" style="font-size: 24px;">✕</button>
             <div class="top-bar-right">
-                <button id="btn-bookmark" class="icon-btn highlight-btn">📍</button>
                 <button id="btn-settings" class="icon-btn font-weight-bold" style="font-size: 18px;">Aa</button>
+                <button id="btn-bookmark" class="icon-btn highlight-btn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                </button>
             </div>
         </div>
 
@@ -106,8 +107,11 @@
         <div id="brightness-overlay"></div>
 
         <div id="bottom-bar" class="ui-bar hidden">
+            <button id="btn-open-toc" class="icon-btn" style="padding-left: 0;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+            </button>
             <input type="range" id="progress-slider" min="0" max="100" value="0" step="0.1">
-            <span id="progress-label">Lendo...</span>
+            <span id="progress-label">... / ...</span>
         </div>
 
         <div id="touch-zones">
