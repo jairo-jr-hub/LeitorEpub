@@ -7,12 +7,12 @@ const tocModal = document.getElementById('toc-modal');
 
 let currentBook = null;
 let rendition = null;
+let currentBookId = null;
 
-// Configurações persistentes inspiradas no Play Livros
 let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
     fontSize: 100,
-    fontFamily: "'Literata', serif", // Começa com a fonte nativa do Play Livros
-    theme: 'sepia', // Começa no Sépia quente nativo
+    fontFamily: "'Literata', serif", 
+    theme: 'sepia', 
     brightness: 100
 };
 
@@ -21,14 +21,28 @@ document.addEventListener('DOMContentLoaded', () => {
     initUIEvents();
 });
 
-// --- FUNÇÃO GLOBAL PARA FECHAR MENUS ---
 function fecharMenus() {
     readerView.classList.add('ui-hidden');
     settingsModal.classList.add('hidden');
     tocModal.classList.add('hidden');
 }
 
-// --- BIBLIOTECA (IndexedDB via LocalForage) ---
+// --- SALVAMENTO AUTOMÁTICO REFORÇADO ---
+async function salvarPosicao(cfi) {
+    if (!currentBookId) return;
+    try {
+        const library = await localforage.getItem('library_metadata') || [];
+        const bookIndex = library.findIndex(b => b.id === currentBookId);
+        if (bookIndex !== -1) {
+            library[bookIndex].cfi = cfi;
+            await localforage.setItem('library_metadata', library);
+        }
+    } catch (e) {
+        console.error("Erro ao salvar progresso automaticamente:", e);
+    }
+}
+
+// --- BIBLIOTECA ---
 async function loadLibrary() {
     bookshelf.innerHTML = '';
     const library = await localforage.getItem('library_metadata') || [];
@@ -45,7 +59,7 @@ async function loadLibrary() {
 
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
-        deleteBtn.innerHTML = '✕'; // Ícone ✕ para excluir
+        deleteBtn.innerHTML = '✕'; 
         deleteBtn.onclick = async (e) => {
             e.stopPropagation();
             if (confirm(`Excluir permanentemente o livro "${bookMeta.title}" do leitor?`)) {
@@ -71,7 +85,6 @@ async function loadLibrary() {
     });
 }
 
-// Upload de Livros
 fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -107,11 +120,12 @@ fileInput.addEventListener('change', async (e) => {
     }
 });
 
-// --- RENDERIZAÇÃO DO LIVRO (EPUB.js) ---
+// --- RENDERIZAÇÃO DO LIVRO ---
 async function openBook(bookId) {
+    currentBookId = bookId;
     libraryView.style.display = 'none';
     readerView.style.display = 'block';
-    fecharMenus(); // Garante que tudo comece fechado
+    fecharMenus(); 
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
@@ -125,12 +139,8 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
-        // Configuração dos Temas Nativos (Hexadecimais exatos do Play Livros extraídos via conta-gotas)
         rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
-        
-        // CORREÇÃO: Usando a cor de fonte exata do Play Livros (#322114) no fundo creme exato (#f9f1e2)
-        rendition.themes.register("sepia", { "body": { "background": "#f9f1e2 !important", "color": "#322114 !important" }});
-        
+        rendition.themes.register("sepia", { "body": { "background": "#fefbec !important", "color": "#5e4e43 !important" }});
         rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
         
         rendition.themes.select(readerSettings.theme);
@@ -138,7 +148,6 @@ async function openBook(bookId) {
         
         if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
 
-        // Hook crítico para injetar estilos de formatação e nitidez
         rendition.hooks.content.register((contents) => {
             atualizarStylesInjetados(); 
         });
@@ -154,7 +163,6 @@ async function openBook(bookId) {
             await rendition.display();
         }
 
-        // Sumário
         currentBook.loaded.navigation.then(nav => {
             const tocList = document.getElementById('toc-list');
             tocList.innerHTML = '';
@@ -192,9 +200,11 @@ async function openBook(bookId) {
             }
         });
 
+        // Evento reativo de virada de página: salva na hora
         rendition.on('relocated', async (location) => {
-            bookMeta.cfi = location.start.cfi;
-            await localforage.setItem('library_metadata', library);
+            if (location && location.start && location.start.cfi) {
+                await salvarPosicao(location.start.cfi);
+            }
             
             if(currentBook.locations.length > 0) {
                 const percentage = currentBook.locations.percentageFromCfi(location.start.cfi);
@@ -208,6 +218,7 @@ async function openBook(bookId) {
 }
 
 function fecharLivro() {
+    currentBookId = null;
     if (currentBook) { currentBook.destroy(); currentBook = null; rendition = null; }
     document.getElementById('viewer').innerHTML = '';
     readerView.style.display = 'none';
@@ -253,8 +264,7 @@ function initUIEvents() {
 
     document.querySelectorAll('.font-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            const fontBtn = e.currentTarget;
-            readerSettings.fontFamily = fontBtn.dataset.font;
+            readerSettings.fontFamily = e.currentTarget.dataset.font;
             aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig();
         });
     });
@@ -282,9 +292,8 @@ function aplicarConfiguracoesDinamicas() {
     
     rendition.themes.select(readerSettings.theme);
     
-    // Matriz de cores exata garantida globalmente
-    const bgColors = { 'light': '#ffffff', 'sepia': '#f9f1e2', 'dark': '#121212' };
-    const textColors = { 'light': '#000000', 'sepia': '#322114', 'dark': '#e0e0e0' };
+    const bgColors = { 'light': '#ffffff', 'sepia': '#fefbec', 'dark': '#121212' };
+    const textColors = { 'light': '#000000', 'sepia': '#5e4e43', 'dark': '#e0e0e0' };
     const currentBgColor = bgColors[readerSettings.theme];
     
     readerView.style.background = currentBgColor;
@@ -302,29 +311,28 @@ function aplicarConfiguracoesDinamicas() {
     }
 
     rendition.themes.fontSize(readerSettings.fontSize + "%");
-    atualizarStylesInjetados(); // Chama a injeção bruta para atualizar a cor da fonte forçada
+    atualizarStylesInjetados();
     aplicarBrilho();
 }
 
-// O motor de injeção bruta para formatação nítida e esmagar o CSS do EPUB
 function atualizarStylesInjetados() {
     if (!rendition) return;
     
-    // Matriz de cores exata para esmagamento
-    const textColors = { 'light': '#000000', 'sepia': '#322114', 'dark': '#e0e0e0' };
+    const bgColors = { 'light': '#ffffff', 'sepia': '#fefbec', 'dark': '#121212' };
+    const textColors = { 'light': '#000000', 'sepia': '#5e4e43', 'dark': '#e0e0e0' };
+    
+    // Cor de destaque forte da primeira linha do capítulo para o tema Sépia
+    const firstPhraseColor = readerSettings.theme === 'sepia' ? '#21160e' : textColors[readerSettings.theme];
     const currentColor = textColors[readerSettings.theme];
-    const isDark = readerSettings.theme === 'dark';
     
     const isLiterata = readerSettings.fontFamily.includes('Literata');
     const fontToApply = readerSettings.fontFamily !== 'Original' ? `font-family: ${readerSettings.fontFamily} !important;` : '';
     
-    // As variáveis exatas usadas pelo Google para impedir o falso negrito e garantir nitidez
     const literataFixNorm = isLiterata ? 'font-variation-settings: "opsz" 14, "wght" 400 !important;' : '';
     const literataFixBold = isLiterata ? 'font-variation-settings: "opsz" 14, "wght" 700 !important;' : '';
 
     try {
         rendition.getContents().forEach(content => {
-            // 1. INJETA A FONTE DO GOOGLE DIRETO NO IFRAME DO LIVRO (Mágica da nitidez)
             if (!content.document.getElementById('literata-font-import')) {
                 const fontLink = content.document.createElement('link');
                 fontLink.id = 'literata-font-import';
@@ -333,7 +341,6 @@ function atualizarStylesInjetados() {
                 content.document.head.appendChild(fontLink);
             }
 
-            // 2. ESMAGA AS REGRAS DO EPUB ORIGINAL (Estilos pesados)
             let style = content.document.getElementById('epub-dynamic-styles');
             if (!style) {
                 style = content.document.createElement('style');
@@ -351,43 +358,38 @@ function atualizarStylesInjetados() {
                     text-rendering: optimizeLegibility !important;
                 }
                 
-                /* Esmaga globalmente para a cor exata (#322114 no sépia) */
                 body, p, span, div, li, a {
                     color: ${currentColor} !important;
                     ${fontToApply}
                 }
 
-                /* Garante títulos em negrito real e na cor exata */
                 h1, h2, h3, h4, h5, h6 {
                     font-weight: 700 !important;
-                    color: ${currentColor} !important;
+                    color: ${firstPhraseColor} !important;
                     ${fontToApply}
                     ${literataFixBold}
                 }
                 
-                /* Força o parágrafo normal a ficar na espessura 400 exata */
                 p, div, li, body {
                     font-weight: 400 !important;
                     ${literataFixNorm}
                 }
                 
-                /* Preserva negritos internos na espessura 700 */
                 b, strong {
                     font-weight: 700 !important;
-                    color: ${currentColor} !important;
+                    color: ${firstPhraseColor} !important;
                     ${literataFixBold}
                 }
 
-                /* CORREÇÃO DO INÍCIO DO CAPÍTULO: Negrito + Small Caps exato do Play Livros */
-                /* Detecta o primeiro parágrafo verdadeiro do capítulo e aplica o estilo pesado */
-                #viewer p:first-of-type,
-                .viewer p:first-of-type,
-                body > p:first-of-type {
+                /* FORÇA BRUTA: Aplica o estilo na primeira frase/linha do capítulo com cor mais forte */
+                p:first-of-type::first-line,
+                body > p:first-of-type,
+                body > div > p:first-of-type {
                     font-weight: 700 !important;
                     font-variant: small-caps !important;
-                    text-transform: lowercase !important; /* Ajuda o small-caps a ficar correto */
-                    letter-spacing: 0.5px !important; /* Dá um respiro elegante */
-                    color: ${currentColor} !important;
+                    text-transform: lowercase !important;
+                    letter-spacing: 0.5px !important;
+                    color: ${firstPhraseColor} !important;
                     ${literataFixBold}
                 }
             `;
