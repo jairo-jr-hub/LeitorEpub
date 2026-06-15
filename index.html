@@ -2,9 +2,10 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta id="theme-color-meta" name="theme-color" content="#fdfaf6">
     <title>Meu Leitor EPUB</title>
     
     <link rel="stylesheet" href="style.css">
@@ -30,11 +31,7 @@
         
         <div id="top-bar" class="floating-bar">
             <button id="btn-back" class="icon-btn">✕</button>
-            <div class="top-actions">
-                <button class="icon-btn">🔍</button>
-                <button id="btn-aa" class="icon-btn font-weight-bold">Aa</button>
-                <button class="icon-btn">🔖</button>
-            </div>
+            <button id="btn-aa" class="icon-btn font-weight-bold">Aa</button>
         </div>
 
         <div id="settings-modal" class="hidden">
@@ -43,7 +40,7 @@
                 <button class="tab-btn" data-tab="iluminacao">Iluminação</button>
             </div>
             
-            <div id="tab-texto" class="tab-content active">
+            <div id="tab-texto" class="tab-content active scrollable">
                 <div class="font-carousel">
                     <button class="font-btn" data-font="Original"><div class="circle">A</div><span>Original</span></button>
                     <button class="font-btn" data-font="Helvetica"><div class="circle">A</div><span>Helvetica</span></button>
@@ -57,17 +54,36 @@
                         <span id="font-size-display">100%</span>
                         <button id="btn-font-plus">T+</button>
                     </div>
-                    <div class="btn-group">
+                    <select id="text-align-select">
+                        <option value="justify">Justificado</option>
+                        <option value="left">Esquerda</option>
+                    </select>
+                </div>
+
+                <hr class="divider">
+
+                <p class="section-title">Espaçamentos</p>
+                <div class="controls-row">
+                    <div class="btn-group" title="Entrelinhas">
                         <button id="btn-line-minus">↕-</button>
+                        <span id="line-height-display">1.5</span>
                         <button id="btn-line-plus">↕+</button>
+                    </div>
+                    <div class="btn-group" title="Entre Palavras">
+                        <button id="btn-word-minus">↔-</button>
+                        <span id="word-space-display">0px</span>
+                        <button id="btn-word-plus">↔+</button>
                     </div>
                 </div>
 
-                <div class="alignment-row">
-                    <select id="text-align-select">
-                        <option value="justify">Justificado</option>
-                        <option value="left">Alinhado à Esquerda</option>
-                    </select>
+                <hr class="divider">
+
+                <p class="section-title">Margens da Página</p>
+                <div class="slider-group">
+                    <label>Topo: <input type="range" id="margin-top" min="0" max="150" value="40"></label>
+                    <label>Rodapé: <input type="range" id="margin-bottom" min="0" max="150" value="40"></label>
+                    <label>Esquerda: <input type="range" id="margin-left" min="0" max="100" value="20"></label>
+                    <label>Direita: <input type="range" id="margin-right" min="0" max="100" value="20"></label>
                 </div>
             </div>
 
@@ -77,7 +93,6 @@
                     <input type="range" id="brightness-slider" min="20" max="100" value="100">
                     <span>🔆</span>
                 </div>
-                
                 <div class="theme-carousel">
                     <button class="theme-color-btn light" data-theme="light"></button>
                     <button class="theme-color-btn sepia" data-theme="sepia"></button>
@@ -87,7 +102,9 @@
         </div>
         
         <div id="viewer"></div>
-        <div id="brightness-overlay"></div> <div id="bottom-bar" class="floating-bar">
+        <div id="brightness-overlay"></div>
+
+        <div id="bottom-bar" class="floating-bar">
             <button class="icon-btn">📑</button>
             <input type="range" id="progress-slider" min="0" max="100" value="0">
             <span id="page-info">-- %</span>
