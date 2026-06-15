@@ -22,7 +22,7 @@
 
     <div id="library-view">
         <header>
-            <h1>Minha Biblioteca</h1>
+            <h1>Minha Biblioteca <small style="font-size: 0.5em; color: #888; font-weight: normal; vertical-align: middle;">v1</small></h1>
             <label class="upload-btn">
                 Adicionar EPUB
                 <input type="file" id="file-input" accept=".epub" style="display: none;" />
@@ -36,6 +36,11 @@
         <div id="top-bar" class="floating-bar">
             <button id="btn-back" class="icon-btn">✕</button>
             <div style="display: flex; gap: 5px;">
+                <button id="btn-bookmark" class="icon-btn" title="Salvar Posição">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                </button>
                 <button id="btn-toc" class="icon-btn" style="font-weight: bold; font-size: 22px;">☰</button>
                 <button id="btn-aa" class="icon-btn font-weight-bold">Aa</button>
             </div>
