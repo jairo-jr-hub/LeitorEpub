@@ -8,7 +8,6 @@ const tocModal = document.getElementById('toc-modal');
 let currentBook = null;
 let rendition = null;
 
-// Configurações persistentes com Literata como padrão absoluto
 let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
     fontSize: 100,
     fontFamily: "'Literata', serif", 
@@ -123,9 +122,20 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
-        // Este hook agora faz a injeção bruta do Google Fonts DENTRO do livro
+        rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
+        
+        // Cores matematicamente idênticas extraídas via conta-gotas
+        rendition.themes.register("sepia", { "body": { "background": "#f9f1e2 !important", "color": "#3e2a1e !important" }});
+        
+        rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
+        
+        rendition.themes.select(readerSettings.theme);
+        rendition.themes.fontSize(readerSettings.fontSize + "%");
+        
+        if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
+
         rendition.hooks.content.register((contents) => {
-            atualizarStylesInjetados(); // Chama a função de força bruta
+            atualizarStylesInjetados(); 
         });
 
         aplicarConfiguracoesDinamicas();
@@ -264,8 +274,9 @@ function salvarConfig() { localStorage.setItem('reader_settings', JSON.stringify
 function aplicarConfiguracoesDinamicas() {
     if (!rendition) return;
     
-    const bgColors = { 'light': '#ffffff', 'sepia': '#f6eeda', 'dark': '#121212' };
-    const textColors = { 'light': '#000000', 'sepia': '#3b2c1e', 'dark': '#e0e0e0' };
+    // Matriz de cores exata garantida globalmente
+    const bgColors = { 'light': '#ffffff', 'sepia': '#f9f1e2', 'dark': '#121212' };
+    const textColors = { 'light': '#000000', 'sepia': '#3e2a1e', 'dark': '#e0e0e0' };
     const currentBgColor = bgColors[readerSettings.theme];
     
     readerView.style.background = currentBgColor;
@@ -282,23 +293,20 @@ function aplicarConfiguracoesDinamicas() {
         themeColorMeta.setAttribute('content', currentBgColor);
     }
 
-    // Aplica globalmente na biblioteca e chama a injeção pesada
     rendition.themes.fontSize(readerSettings.fontSize + "%");
     atualizarStylesInjetados();
     aplicarBrilho();
 }
 
-// --- O MOTOR DE FORÇA BRUTA (A MÁGICA ACONTECE AQUI) ---
 function atualizarStylesInjetados() {
     if (!rendition) return;
     
-    const textColors = { 'light': '#000000', 'sepia': '#3b2c1e', 'dark': '#e0e0e0' };
+    const textColors = { 'light': '#000000', 'sepia': '#3e2a1e', 'dark': '#e0e0e0' };
     const currentColor = textColors[readerSettings.theme];
     const fontToApply = readerSettings.fontFamily !== 'Original' ? `font-family: ${readerSettings.fontFamily} !important;` : '';
 
     try {
         rendition.getContents().forEach(content => {
-            // 1. INJETA A FONTE DO GOOGLE DIRETO NO IFRAME DO LIVRO
             if (!content.document.getElementById('literata-font-import')) {
                 const fontLink = content.document.createElement('link');
                 fontLink.id = 'literata-font-import';
@@ -307,7 +315,6 @@ function atualizarStylesInjetados() {
                 content.document.head.appendChild(fontLink);
             }
 
-            // 2. ESMAGA AS CORES E FONTES DO EPUB ORIGINAL
             let style = content.document.getElementById('epub-dynamic-styles');
             if (!style) {
                 style = content.document.createElement('style');
@@ -325,7 +332,6 @@ function atualizarStylesInjetados() {
                     text-rendering: optimizeLegibility !important;
                 }
                 
-                /* Esmaga a cor de títulos, textos fracos, links e parágrafos */
                 body, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
                     color: ${currentColor} !important;
                     ${fontToApply}
