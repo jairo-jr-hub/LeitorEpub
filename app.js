@@ -20,6 +20,13 @@ document.addEventListener('DOMContentLoaded', () => {
     initUIEvents();
 });
 
+// --- FUNÇÃO GLOBAL PARA FECHAR MENUS ---
+function fecharMenus() {
+    readerView.classList.add('ui-hidden');
+    settingsModal.classList.add('hidden');
+    tocModal.classList.add('hidden');
+}
+
 // --- BIBLIOTECA ---
 async function loadLibrary() {
     bookshelf.innerHTML = '';
@@ -102,9 +109,7 @@ fileInput.addEventListener('change', async (e) => {
 async function openBook(bookId) {
     libraryView.style.display = 'none';
     readerView.style.display = 'block';
-    readerView.classList.add('ui-hidden');
-    settingsModal.classList.add('hidden');
-    tocModal.classList.add('hidden');
+    fecharMenus(); // Garante que tudo comece fechado
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
@@ -157,12 +162,11 @@ async function openBook(bookId) {
             await rendition.display();
         }
 
-        // NOVO: Carregamento do Sumário (Table of Contents)
+        // --- CARREGAMENTO DO SUMÁRIO ---
         currentBook.loaded.navigation.then(nav => {
             const tocList = document.getElementById('toc-list');
             tocList.innerHTML = '';
             
-            // Função recursiva para ler capítulos e subcapítulos
             const generateToc = (items, level = 0) => {
                 items.forEach(chapter => {
                     const li = document.createElement('li');
@@ -170,9 +174,10 @@ async function openBook(bookId) {
                     li.style.paddingLeft = `${level * 20}px`;
                     li.textContent = chapter.label.trim() || 'Capítulo';
                     
+                    // CORREÇÃO: Agora sim, ao clicar, ele fecha o menu sumário
                     li.onclick = () => {
                         rendition.display(chapter.href);
-                        fecharMenus(); // Esconde tudo e foca na leitura
+                        fecharMenus(); // Fecha o sumário e as barras imeditamente
                     };
                     tocList.appendChild(li);
                     
@@ -236,7 +241,6 @@ function initUIEvents() {
 
     document.getElementById('btn-back').addEventListener('click', fecharLivro);
     
-    // Botões dos modais
     document.getElementById('btn-aa').addEventListener('click', () => {
         tocModal.classList.add('hidden');
         settingsModal.classList.toggle('hidden');
@@ -246,12 +250,6 @@ function initUIEvents() {
         settingsModal.classList.add('hidden');
         tocModal.classList.toggle('hidden');
     });
-
-    function fecharMenus() {
-        readerView.classList.add('ui-hidden');
-        settingsModal.classList.add('hidden');
-        tocModal.classList.add('hidden');
-    }
 
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -300,7 +298,6 @@ function aplicarConfiguracoesDinamicas() {
     readerView.style.background = currentBgColor;
     settingsModal.style.background = (readerSettings.theme === 'dark') ? '#1f1f1f' : '#ffffff';
     
-    // Deixa o menu do Sumário com a mesma cor do leitor para dar imersão
     tocModal.style.background = currentBgColor;
     tocModal.style.color = textColors[readerSettings.theme];
 
