@@ -18,12 +18,9 @@ const DOM = {
 let book = null;
 let rendition = null;
 let currentBookId = null;
+let currentLocationCfi = null; 
 
-// O SEGREDO DA V3: Rastreia a porcentagem matemática absoluta, não CFIs frágeis.
-let currentPercentage = 0; 
-let totalPages = 1;
-
-let settings = JSON.parse(localStorage.getItem('reader_v3_configs')) || {
+let settings = JSON.parse(localStorage.getItem('reader_v4_configs')) || {
     font: "'Literata', serif",
     size: 100,
     lineHeight: 1.5,
@@ -33,13 +30,16 @@ let settings = JSON.parse(localStorage.getItem('reader_v3_configs')) || {
     paddingY: 60
 };
 
+// Alterar visualmente a versão no HTML para controle
 document.addEventListener('DOMContentLoaded', () => {
+    document.querySelector('header h1').innerHTML = 'Minha Biblioteca <span style="font-size: 12px; background: #fbbc05; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle;">v4 Estável</span>';
+    document.title = "Leitor EPUB PRO - v4";
     carregarBiblioteca();
     carregarUIConfigs();
 });
 
 // ==========================================
-// 1. BIBLIOTECA
+// 1. BIBLIOTECA (MANTÉM V2/V3)
 // ==========================================
 async function carregarBiblioteca() {
     DOM.bookshelf.innerHTML = '';
@@ -62,7 +62,7 @@ async function carregarBiblioteca() {
             e.stopPropagation();
             if (confirm(`Excluir "${bookMeta.title}" do aplicativo?`)) {
                 await localforage.removeItem(bookMeta.id); 
-                localStorage.removeItem('pct_' + bookMeta.id); // V3 usa pct_
+                localStorage.removeItem('cfi_v4_' + bookMeta.id); 
                 const nova = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', nova); 
                 carregarBiblioteca();
@@ -113,8 +113,7 @@ DOM.fileInput.addEventListener('change', async (e) => {
         await localforage.setItem(bookId, arrayBuffer);
         
         const library = await localforage.getItem('library_metadata') || [];
-        // V3 salva 'pct' em vez de 'cfi'
-        library.push({ id: bookId, title: metadata.title || "Livro Desconhecido", cover: coverBase64, pct: 0 });
+        library.push({ id: bookId, title: metadata.title || "Livro Desconhecido", cover: coverBase64 });
         await localforage.setItem('library_metadata', library);
         
         tempBook.destroy();
@@ -130,15 +129,15 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. MOTOR DE LEITURA (V3 - LÓGICA DE PÁGINAS)
+// 2. MOTOR DE LEITURA (V4 - O RETORNO AO CFI SEGURO)
 // ==========================================
 async function abrirLivro(bookId) {
     currentBookId = bookId;
-    currentPercentage = 0;
+    currentLocationCfi = null;
     DOM.library.classList.add('hidden');
     DOM.reader.classList.remove('hidden');
     esconderMenus();
-    DOM.progressLabel.textContent = "Paginando...";
+    DOM.progressLabel.textContent = "...";
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
@@ -168,33 +167,43 @@ async function abrirLivro(bookId) {
         aplicarEstilosNoMotor();
         gerarSumario();
         
-        // 1. Busca a Porcentagem Salva
-        let pctSalvo = localStorage.getItem('pct_' + bookId);
-        if (!pctSalvo) {
+        // 1. Busca o CFI Salvo
+        let cfiSalvo = localStorage.getItem('cfi_v4_' + bookId);
+        if (!cfiSalvo) {
             const library = await localforage.getItem('library_metadata');
             const bookMeta = library.find(b => b.id === bookId);
-            if (bookMeta && bookMeta.pct) pctSalvo = bookMeta.pct;
+            if (bookMeta && bookMeta.cfi) cfiSalvo = bookMeta.cfi;
         }
         
-        // 2. Transforma o valor salvo em float
-        currentPercentage = pctSalvo ? parseFloat(pctSalvo) : 0;
+        // 2. Transição Limpa e Direta (Nada de esperar gerar arrays enormes de páginas)
+        try {
+            if (cfiSalvo) {
+                await rendition.display(cfiSalvo);
+            } else {
+                await rendition.display();
+            }
+            currentLocationCfi = rendition.location ? rendition.location.start.cfi : cfiSalvo;
+        } catch(e) {
+            console.warn("CFI inválido ou motor alterado. Abrindo início do livro.");
+            await rendition.display();
+            currentLocationCfi = rendition.location ? rendition.location.start.cfi : null;
+        }
 
-        // 3. Renderiza o livro (inicial para destrancar o motor)
-        await rendition.display();
-        
-        // 4. Mágica da V3: Calcula as páginas de verdade baseado no tamanho da letra
-        await gerarPaginas(currentPercentage);
+        // 3. Gera locais SOMENTE para a barra de progresso em background
+        book.ready.then(() => {
+            return book.locations.generate(1600);
+        }).then(() => {
+            atualizarProgressoVisual(currentLocationCfi);
+        });
 
-        // 5. Evento de Virada de Página: Salva a % real
+        // 4. Virada de página: Salva CFI e atualiza %
         rendition.on('relocated', (location) => {
             DOM.btnBookmark.classList.remove('saved');
             DOM.btnBookmark.textContent = '📍';
             if (location && location.start) {
-                // Descobre matematicamente onde estamos e atualiza a UI de "Página X de Y"
-                atualizarProgresso(location.start.cfi);
-                
-                // Grava a Porcentagem na memória rápida
-                localStorage.setItem('pct_' + currentBookId, currentPercentage);
+                currentLocationCfi = location.start.cfi;
+                atualizarProgressoVisual(currentLocationCfi);
+                localStorage.setItem('cfi_v4_' + currentBookId, currentLocationCfi);
             }
         });
 
@@ -204,47 +213,22 @@ async function abrirLivro(bookId) {
     }
 }
 
-// GERA AS PÁGINAS DEPENDENDO DO ZOOM
-async function gerarPaginas(porcentagemDestino) {
-    DOM.progressLabel.textContent = "Paginando...";
-    
-    // O pulo do gato: Se a letra for grande (200%), usamos menos caracteres por página gerada.
-    // Isso cria mais páginas no total, imitando perfeitamente o comportamento físico.
-    const caracteresBasePorPagina = Math.round(1200 * (100 / settings.size));
-    
-    await book.locations.generate(caracteresBasePorPagina);
-    totalPages = book.locations.length || 1;
-    
-    if (porcentagemDestino !== null && porcentagemDestino > 0) {
-        // Encontra o CFI exato referente àquela porcentagem nas novas dimensões
-        const targetCfi = book.locations.cfiFromPercentage(porcentagemDestino);
-        if (targetCfi) {
-            await rendition.display(targetCfi);
-        }
-    }
-    
-    // Atualiza os números no rodapé
-    if (rendition.location && rendition.location.start) {
-        atualizarProgresso(rendition.location.start.cfi);
-    } else {
-        DOM.progressLabel.textContent = `Pág. 1 de ${totalPages}`;
-    }
-}
-
 // ==========================================
-// SALVAMENTO MANUAL ABSOLUTO V3
+// SALVAMENTO MANUAL ABSOLUTO V4
 // ==========================================
 DOM.btnBookmark.addEventListener('click', async () => {
-    if (currentBookId) {
-        // Salva na memória rápida
-        localStorage.setItem('pct_' + currentBookId, currentPercentage);
+    // Busca a posição viva do motor
+    const localizacaoExata = rendition.location ? rendition.location.start.cfi : currentLocationCfi;
+
+    if (localizacaoExata && currentBookId) {
+        localStorage.setItem('cfi_v4_' + currentBookId, localizacaoExata);
+        currentLocationCfi = localizacaoExata;
         
-        // Salva no banco de dados raiz
         const library = await localforage.getItem('library_metadata');
         if (library) {
             const bookIndex = library.findIndex(b => b.id === currentBookId);
             if (bookIndex !== -1) {
-                library[bookIndex].pct = currentPercentage;
+                library[bookIndex].cfi = localizacaoExata;
                 await localforage.setItem('library_metadata', library);
             }
         }
@@ -254,15 +238,15 @@ DOM.btnBookmark.addEventListener('click', async () => {
     }
 });
 
-// Auto-Save de emergência do iOS
+// Auto-Save de emergência
 document.addEventListener("visibilitychange", async () => {
-    if (document.visibilityState === 'hidden' && currentBookId) {
-        localStorage.setItem('pct_' + currentBookId, currentPercentage);
+    if (document.visibilityState === 'hidden' && currentBookId && currentLocationCfi) {
+        localStorage.setItem('cfi_v4_' + currentBookId, currentLocationCfi);
         const library = await localforage.getItem('library_metadata');
         if (library) {
             const bookIndex = library.findIndex(b => b.id === currentBookId);
             if (bookIndex !== -1) {
-                library[bookIndex].pct = currentPercentage;
+                library[bookIndex].cfi = currentLocationCfi;
                 localforage.setItem('library_metadata', library);
             }
         }
@@ -270,13 +254,13 @@ document.addEventListener("visibilitychange", async () => {
 });
 
 async function fecharLivro() {
-    if (currentBookId) {
-        localStorage.setItem('pct_' + currentBookId, currentPercentage);
+    if (currentBookId && currentLocationCfi) {
+        localStorage.setItem('cfi_v4_' + currentBookId, currentLocationCfi);
         const library = await localforage.getItem('library_metadata');
         if (library) {
             const bookIndex = library.findIndex(b => b.id === currentBookId);
             if (bookIndex !== -1) {
-                library[bookIndex].pct = currentPercentage;
+                library[bookIndex].cfi = currentLocationCfi;
                 await localforage.setItem('library_metadata', library);
             }
         }
@@ -285,7 +269,7 @@ async function fecharLivro() {
     if (book) { book.destroy(); book = null; rendition = null; }
     document.getElementById('viewer').innerHTML = '';
     currentBookId = null;
-    currentPercentage = 0;
+    currentLocationCfi = null;
     
     DOM.reader.classList.add('hidden');
     DOM.library.classList.remove('hidden');
@@ -294,7 +278,7 @@ async function fecharLivro() {
 }
 
 // ==========================================
-// 3. NAVEGAÇÃO E ATUALIZAÇÃO DA PÁGINA X DE Y
+// 3. NAVEGAÇÃO
 // ==========================================
 function gerarSumario() {
     book.loaded.navigation.then(nav => {
@@ -327,16 +311,12 @@ function gerarSumario() {
     });
 }
 
-function atualizarProgresso(cfi) {
+function atualizarProgressoVisual(cfi) {
     if (book && book.locations.length > 0 && cfi) {
         const percent = book.locations.percentageFromCfi(cfi);
-        currentPercentage = percent; // Trava o rastreador
-        
-        // Matemática para saber a Página Física com base no array calculado
-        const currentPage = Math.max(1, Math.round(percent * totalPages));
-        
-        DOM.progressSlider.value = Math.round(percent * 100);
-        DOM.progressLabel.textContent = `Pág. ${currentPage} de ${totalPages}`;
+        const valorReal = Math.round(percent * 100);
+        DOM.progressSlider.value = valorReal;
+        DOM.progressLabel.textContent = `${valorReal}%`;
     }
 }
 
@@ -349,19 +329,20 @@ DOM.progressSlider.addEventListener('change', (e) => {
 });
 
 // ==========================================
-// 4. MOTOR DE ESTILIZAÇÃO
+// 4. MOTOR DE ESTILIZAÇÃO (REFEITO PARA SER INSTANTÂNEO)
 // ==========================================
 
 async function alterarConfiguracaoLayout(callback) {
-    const pctAtual = currentPercentage; // Salva a posição relativa antes de mexer
+    const cfiAtual = rendition.currentLocation() ? rendition.currentLocation().start.cfi : currentLocationCfi;
     
-    callback(); // Altera os values (zoom, respiro, etc)
-    
+    callback(); 
     carregarUIConfigs();
-    salvarConfigs(); // Injeta o CSS
+    salvarConfigs(); 
     
-    // Repagina o livro inteiro e pula pra posição de volta
-    await gerarPaginas(pctAtual);
+    // Na V4, como a margem é tratada pelo CSS (100dvh), ele repagina o IFRAME de forma levíssima
+    if (cfiAtual && rendition) {
+        await rendition.display(cfiAtual);
+    }
 }
 
 function aplicarEstilosNoMotor() {
@@ -410,7 +391,7 @@ function aplicarEstilosNoMotor() {
 }
 
 function salvarConfigs() {
-    localStorage.setItem('reader_v3_configs', JSON.stringify(settings));
+    localStorage.setItem('reader_v4_configs', JSON.stringify(settings));
     aplicarEstilosNoMotor();
 }
 
@@ -466,7 +447,7 @@ DOM.btnOpenToc.addEventListener('click', () => {
     DOM.tocModal.classList.toggle('hidden');
 });
 
-// Abas
+// Abas de Configuração
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -476,7 +457,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
-// Ações dos Controles com V3 Trava de Layout (Recalcula as Páginas)
+// Ações dos Controles com V4 Trava de Layout
 document.querySelectorAll('.font-btn').forEach(btn => { 
     btn.addEventListener('click', (e) => { 
         alterarConfiguracaoLayout(() => { settings.font = e.currentTarget.dataset.font; }); 
@@ -506,7 +487,7 @@ document.getElementById('btn-margin-y-plus').addEventListener('click', () => {
     alterarConfiguracaoLayout(() => { if (settings.paddingY < 150) settings.paddingY += 10; }); 
 });
 
-// Brilho e Cores (Não repaginam, apenas mudam visual)
+// Brilho e Cores
 document.getElementById('brightness-slider').addEventListener('input', (e) => { 
     settings.brightness = e.target.value; 
     salvarConfigs(); 
