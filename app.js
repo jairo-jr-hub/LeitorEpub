@@ -20,13 +20,15 @@ let rendition = null;
 let currentBookId = null;
 let currentLocationCfi = null; 
 
-let settings = JSON.parse(localStorage.getItem('reader_pro_configs')) || {
+// V2 CONFIGS: Adicionado o "paddingY" para controlar o respiro interno do leitor
+let settings = JSON.parse(localStorage.getItem('reader_v2_configs')) || {
     font: "'Literata', serif",
     size: 100,
     lineHeight: 1.5,
     align: "justify",
     theme: "sepia",
-    brightness: 100
+    brightness: 100,
+    paddingY: 60 // Respiro padrão configurável
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -42,7 +44,7 @@ async function carregarBiblioteca() {
     const library = await localforage.getItem('library_metadata') || [];
     
     if (library.length === 0) {
-        DOM.bookshelf.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #888;">Nenhum livro importado.</p>';
+        DOM.bookshelf.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #888; padding-top: 40px;">Nenhum livro importado.</p>';
         return;
     }
 
@@ -125,7 +127,7 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. MOTOR DE LEITURA E SALVAMENTO BRUTAL
+// 2. MOTOR DE LEITURA E SALVAMENTO
 // ==========================================
 async function abrirLivro(bookId) {
     currentBookId = bookId;
@@ -160,25 +162,18 @@ async function abrirLivro(bookId) {
             }
         });
 
-        // CRUCIAL: Força a estilização completa do zoom ANTES de desenhar o livro na tela
         aplicarEstilosNoMotor();
         
         let cfiSalvo = localStorage.getItem('cfi_' + bookId);
-        
         if (!cfiSalvo) {
             const library = await localforage.getItem('library_metadata');
             const bookMeta = library.find(b => b.id === bookId);
-            if (bookMeta && bookMeta.cfi) {
-                cfiSalvo = bookMeta.cfi;
-            }
+            if (bookMeta && bookMeta.cfi) cfiSalvo = bookMeta.cfi;
         }
         
         try {
-            if (cfiSalvo) {
-                await rendition.display(cfiSalvo);
-            } else {
-                await rendition.display();
-            }
+            if (cfiSalvo) await rendition.display(cfiSalvo);
+            else await rendition.display();
             currentLocationCfi = rendition.location ? rendition.location.start.cfi : cfiSalvo;
         } catch(e) {
             await rendition.display();
@@ -196,7 +191,7 @@ async function abrirLivro(bookId) {
             if (location && location.start) {
                 currentLocationCfi = location.start.cfi;
                 atualizarProgresso(currentLocationCfi);
-                localStorage.setItem('cfi_' + currentBookId, currentLocationCfi);
+                localStorage.setItem('cfi_' + currentBookId, currentLocationCfi); // Auto-Save
             }
         });
 
@@ -206,15 +201,11 @@ async function abrirLivro(bookId) {
     }
 }
 
-// ==========================================
 // SALVAMENTO MANUAL ABSOLUTO (SEM ERRO)
-// ==========================================
 DOM.btnBookmark.addEventListener('click', async () => {
-    // Captura em tempo real a página diretamente do estado ativo do renderizador
     const localizacaoReal = rendition.currentLocation() ? rendition.currentLocation().start.cfi : currentLocationCfi;
 
     if (localizacaoReal && currentBookId) {
-        // Grava no arquivo de memória estável do iOS imediatamente
         localStorage.setItem('cfi_' + currentBookId, localizacaoReal);
         currentLocationCfi = localizacaoReal;
         
@@ -229,7 +220,6 @@ DOM.btnBookmark.addEventListener('click', async () => {
 
         DOM.btnBookmark.classList.add('saved');
         DOM.btnBookmark.textContent = '✔ Salvo';
-        
         atualizarProgresso(localizacaoReal);
     } else {
         alert("Erro ao ler posição. Aguarde um segundo e tente novamente.");
@@ -333,6 +323,31 @@ DOM.progressSlider.addEventListener('change', (e) => {
 // ==========================================
 // 4. MOTOR DE ESTILIZAÇÃO E UI
 // ==========================================
+
+// Função MESTRA da V2: Trava a página (CFI) -> Aplica o visual -> Devolve você para a mesma página
+async function alterarConfiguracaoLayout(callback) {
+    const cfiAtual = rendition.currentLocation() ? rendition.currentLocation().start.cfi : currentLocationCfi;
+    
+    callback(); // Altera os valores do settings
+    
+    carregarUIConfigs();
+    salvarConfigs(); // Aplica no motor
+    
+    // Força o motor a repaginar mantendo a palavra exata na tela
+    if (cfiAtual && rendition) {
+        await rendition.display(cfiAtual);
+        
+        // Recalcula o slider de páginas em background com o novo estilo
+        setTimeout(() => {
+            if (book.locations.length > 0) {
+                book.locations.generate(1600).then(() => {
+                    atualizarProgresso(cfiAtual);
+                });
+            }
+        }, 100);
+    }
+}
+
 function aplicarEstilosNoMotor() {
     if (!rendition) return;
 
@@ -355,13 +370,14 @@ function aplicarEstilosNoMotor() {
 
     rendition.themes.fontSize(`${settings.size}%`);
 
+    // Injeção com a variável de paddingY (O Respiro) ajustável pelo usuário
     rendition.themes.default({
         "body": {
             "font-family": settings.font === 'Original' ? "inherit !important" : `${settings.font} !important`,
             "text-align": `${settings.align} !important`,
             "line-height": `${settings.lineHeight} !important`,
             "color": `${textCor} !important`,
-            "padding": "0 20px !important" 
+            "padding": `${settings.paddingY}px 20px ${settings.paddingY}px 20px !important` 
         },
         "p": {
             "text-align": `${settings.align} !important`,
@@ -379,13 +395,14 @@ function aplicarEstilosNoMotor() {
 }
 
 function salvarConfigs() {
-    localStorage.setItem('reader_pro_configs', JSON.stringify(settings));
+    localStorage.setItem('reader_v2_configs', JSON.stringify(settings));
     aplicarEstilosNoMotor();
 }
 
 function carregarUIConfigs() {
     document.getElementById('label-size').textContent = `${settings.size}%`;
     document.getElementById('label-line').textContent = settings.lineHeight;
+    document.getElementById('label-margin-y').textContent = `Resp: ${settings.paddingY}px`;
     document.getElementById('select-align').value = settings.align;
     document.getElementById('brightness-slider').value = settings.brightness;
     
@@ -444,13 +461,45 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
-// Ações dos Controles
-document.querySelectorAll('.font-btn').forEach(btn => { btn.addEventListener('click', (e) => { settings.font = e.currentTarget.dataset.font; carregarUIConfigs(); salvarConfigs(); }); });
-document.getElementById('btn-size-minus').addEventListener('click', () => { if (settings.size > 70) settings.size -= 10; carregarUIConfigs(); salvarConfigs(); });
-document.getElementById('btn-size-plus').addEventListener('click', () => { if (settings.size < 200) settings.size += 10; carregarUIConfigs(); salvarConfigs(); });
-document.getElementById('btn-line-minus').addEventListener('click', () => { if (settings.lineHeight > 1.2) settings.lineHeight = (settings.lineHeight - 0.1).toFixed(1); carregarUIConfigs(); salvarConfigs(); });
-document.getElementById('btn-line-plus').addEventListener('click', () => { if (settings.lineHeight < 2.0) settings.lineHeight = (parseFloat(settings.lineHeight) + 0.1).toFixed(1); carregarUIConfigs(); salvarConfigs(); });
-document.getElementById('select-align').addEventListener('change', (e) => { settings.align = e.target.value; salvarConfigs(); });
-document.getElementById('brightness-slider').addEventListener('input', (e) => { settings.brightness = e.target.value; salvarConfigs(); });
+// Ações dos Controles usando a Mágica da V2 (alterarConfiguracaoLayout)
+document.querySelectorAll('.font-btn').forEach(btn => { 
+    btn.addEventListener('click', (e) => { 
+        alterarConfiguracaoLayout(() => { settings.font = e.currentTarget.dataset.font; }); 
+    }); 
+});
+document.getElementById('btn-size-minus').addEventListener('click', () => { 
+    alterarConfiguracaoLayout(() => { if (settings.size > 70) settings.size -= 10; }); 
+});
+document.getElementById('btn-size-plus').addEventListener('click', () => { 
+    alterarConfiguracaoLayout(() => { if (settings.size < 250) settings.size += 10; }); 
+});
+document.getElementById('btn-line-minus').addEventListener('click', () => { 
+    alterarConfiguracaoLayout(() => { if (settings.lineHeight > 1.2) settings.lineHeight = (parseFloat(settings.lineHeight) - 0.1).toFixed(1); }); 
+});
+document.getElementById('btn-line-plus').addEventListener('click', () => { 
+    alterarConfiguracaoLayout(() => { if (settings.lineHeight < 2.5) settings.lineHeight = (parseFloat(settings.lineHeight) + 0.1).toFixed(1); }); 
+});
+document.getElementById('select-align').addEventListener('change', (e) => { 
+    alterarConfiguracaoLayout(() => { settings.align = e.target.value; }); 
+});
 
-document.querySelectorAll('.theme-btn').forEach(btn => { btn.addEventListener('click', (e) => { settings.theme = e.target.dataset.theme; carregarUIConfigs(); salvarConfigs(); }); });
+// Controle de Respiro (NOVO)
+document.getElementById('btn-margin-y-minus').addEventListener('click', () => { 
+    alterarConfiguracaoLayout(() => { if (settings.paddingY > 0) settings.paddingY -= 10; }); 
+});
+document.getElementById('btn-margin-y-plus').addEventListener('click', () => { 
+    alterarConfiguracaoLayout(() => { if (settings.paddingY < 150) settings.paddingY += 10; }); 
+});
+
+// Controles Visuais (Não mexem no layout do texto, então só salvam direto)
+document.getElementById('brightness-slider').addEventListener('input', (e) => { 
+    settings.brightness = e.target.value; 
+    salvarConfigs(); 
+});
+document.querySelectorAll('.theme-btn').forEach(btn => { 
+    btn.addEventListener('click', (e) => { 
+        settings.theme = e.target.dataset.theme; 
+        carregarUIConfigs(); 
+        salvarConfigs(); 
+    }); 
+});
