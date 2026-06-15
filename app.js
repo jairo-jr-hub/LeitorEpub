@@ -20,6 +20,7 @@ let rendition = null;
 let currentBookId = null;
 let currentLocationCfi = null; 
 let totalPages = 1;
+let isLocationsReady = false; // NOVO: flag para saber se a paginação está pronta
 
 let settings = JSON.parse(localStorage.getItem('reader_v6_configs')) || {
     font: "'Literata', serif",
@@ -35,6 +36,33 @@ document.addEventListener('DOMContentLoaded', () => {
     carregarBiblioteca();
     carregarUIConfigs();
 });
+
+// ==========================================
+// WRAPPER SEGURO PARA localStorage (iOS-safe)
+// ==========================================
+const SafeStorage = {
+    set(key, value) {
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (e) {
+            console.warn('localStorage bloqueado:', e);
+            return false;
+        }
+    },
+    get(key) {
+        try {
+            return localStorage.getItem(key);
+        } catch (e) {
+            return null;
+        }
+    },
+    remove(key) {
+        try {
+            localStorage.removeItem(key);
+        } catch (e) {}
+    }
+};
 
 // ==========================================
 // 1. BIBLIOTECA
@@ -60,7 +88,7 @@ async function carregarBiblioteca() {
             e.stopPropagation();
             if (confirm(`Excluir "${bookMeta.title}" do aplicativo?`)) {
                 await localforage.removeItem(bookMeta.id); 
-                localStorage.removeItem('cfi_v6_' + bookMeta.id); 
+                SafeStorage.remove('cfi_v6_' + bookMeta.id); 
                 const nova = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', nova); 
                 carregarBiblioteca();
@@ -127,12 +155,13 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. MOTOR DE LEITURA (O SCANNER BLINDADO)
+// 2. MOTOR DE LEITURA (CORRIGIDO)
 // ==========================================
 async function abrirLivro(bookId) {
     currentBookId = bookId;
     currentLocationCfi = null;
     totalPages = 1;
+    isLocationsReady = false;
     DOM.library.classList.add('hidden');
     DOM.reader.classList.remove('hidden');
     esconderMenus();
@@ -163,110 +192,171 @@ async function abrirLivro(bookId) {
             }
         });
 
-        // 1. Aplica as margens pelo lado de fora para curar o bug do scanner
         aplicarEstilosNoMotor();
         gerarSumario();
         
-        // 2. Busca o salvamento ultrarrápido
-        let cfiSalvo = localStorage.getItem('cfi_v6_' + bookId);
+        // CORREÇÃO: Prioriza o CFI salvo no localforage (mais confiável no iOS)
+        let cfiSalvo = null;
+        
+        // 1. Tenta localStorage primeiro (rápido)
+        cfiSalvo = SafeStorage.get('cfi_v6_' + bookId);
+        
+        // 2. Se não achou, tenta o metadata do livro (persistente no localforage)
         if (!cfiSalvo) {
             const library = await localforage.getItem('library_metadata');
-            const bookMeta = library.find(b => b.id === bookId);
-            if (bookMeta && bookMeta.cfi) cfiSalvo = bookMeta.cfi;
+            const bookMeta = library ? library.find(b => b.id === bookId) : null;
+            if (bookMeta && bookMeta.cfi) {
+                cfiSalvo = bookMeta.cfi;
+            }
         }
         
         try {
-            if (cfiSalvo) await rendition.display(cfiSalvo);
-            else await rendition.display();
-            currentLocationCfi = rendition.location ? rendition.location.start.cfi : cfiSalvo;
+            if (cfiSalvo) {
+                await rendition.display(cfiSalvo);
+                currentLocationCfi = cfiSalvo;
+            } else {
+                await rendition.display();
+                const loc = rendition.currentLocation();
+                currentLocationCfi = loc && loc.start ? loc.start.cfi : null;
+            }
         } catch(e) {
             await rendition.display();
-            currentLocationCfi = rendition.location ? rendition.location.start.cfi : null;
+            const loc = rendition.currentLocation();
+            currentLocationCfi = loc && loc.start ? loc.start.cfi : null;
         }
 
-        // 3. Paginação matemática em background para "Página X de Y"
+        // Gera paginação em background
         gerarPaginasParaInterface(currentLocationCfi);
 
-        // 4. Virada de página: Salva o código instantaneamente no iOS
+        // CORREÇÃO: Usa o parâmetro 'location' do evento, não rendition.location
         rendition.on('relocated', (location) => {
             DOM.btnBookmark.classList.remove('saved');
             DOM.btnBookmark.textContent = '📍';
-            if (location && location.start) {
+            
+            // Só atualiza se location for válido
+            if (location && location.start && location.start.cfi) {
                 currentLocationCfi = location.start.cfi;
-                atualizarInterfaceDePagina(currentLocationCfi);
-                localStorage.setItem('cfi_v6_' + currentBookId, currentLocationCfi);
+                
+                // Atualiza UI de página SÓ se a paginação já estiver pronta
+                if (isLocationsReady) {
+                    atualizarInterfaceDePagina(currentLocationCfi);
+                } else {
+                    DOM.progressLabel.textContent = "Calculando páginas...";
+                }
+                
+                // Salva no localStorage (com fallback silencioso)
+                SafeStorage.set('cfi_v6_' + currentBookId, currentLocationCfi);
+                
+                // Salva também no metadata do livro (backup persistente)
+                salvarCfiNoMetadata(currentBookId, currentLocationCfi);
             }
         });
 
     } catch (e) {
+        console.error("Falha ao abrir livro:", e);
         alert("Falha crítica ao abrir o livro.");
         fecharLivro();
     }
 }
 
-// Cálculo Mágico para imitar páginas reais baseadas no Zoom
+// NOVO: Salva CFI no metadata do livro no localforage (persistente)
+async function salvarCfiNoMetadata(bookId, cfi) {
+    try {
+        const library = await localforage.getItem('library_metadata');
+        if (library) {
+            const idx = library.findIndex(b => b.id === bookId);
+            if (idx !== -1) {
+                library[idx].cfi = cfi;
+                await localforage.setItem('library_metadata', library);
+            }
+        }
+    } catch (e) {
+        console.warn('Erro ao salvar CFI no metadata:', e);
+    }
+}
+
 function gerarPaginasParaInterface(cfiAtual) {
     DOM.progressLabel.textContent = "Calculando...";
-    // Usa uma média de caracteres por página dependendo do tamanho da letra
     const charsPorPagina = Math.round(1300 * (100 / settings.size));
     
     book.locations.generate(charsPorPagina).then(() => {
         totalPages = book.locations.length || 1;
+        isLocationsReady = true; // MARCA COMO PRONTO
         atualizarInterfaceDePagina(cfiAtual);
+    }).catch(err => {
+        console.warn('Erro ao gerar locations:', err);
+        isLocationsReady = true;
+        totalPages = 1;
     });
 }
 
 function atualizarInterfaceDePagina(cfi) {
-    if (book && book.locations.length > 0 && cfi) {
-        const percent = book.locations.percentageFromCfi(cfi);
-        const paginaExata = Math.max(1, Math.round(percent * totalPages));
-        
-        DOM.progressSlider.value = Math.round(percent * 100);
-        DOM.progressLabel.textContent = `Pág. ${paginaExata} de ${totalPages}`;
+    if (!cfi) return;
+    
+    // Só calcula se book.locations estiver pronto
+    if (book && book.locations && book.locations.length > 0) {
+        try {
+            const percent = book.locations.percentageFromCfi(cfi);
+            const paginaExata = Math.max(1, Math.round(percent * totalPages));
+            DOM.progressSlider.value = Math.round(percent * 100);
+            DOM.progressLabel.textContent = `Pág. ${paginaExata} de ${totalPages}`;
+        } catch (e) {
+            DOM.progressLabel.textContent = "Lendo...";
+        }
+    } else {
+        DOM.progressLabel.textContent = "Lendo...";
     }
 }
 
 // ==========================================
-// SALVAMENTO MANUAL ABSOLUTO V6
+// SALVAMENTO MANUAL ABSOLUTO V6 (CORRIGIDO)
 // ==========================================
 DOM.btnBookmark.addEventListener('click', async () => {
-    const localizacaoExata = rendition.location ? rendition.location.start.cfi : currentLocationCfi;
+    // CORREÇÃO: Usa currentLocationCfi que sempre é atualizado pelo 'relocated'
+    const localizacaoExata = currentLocationCfi;
 
     if (localizacaoExata && currentBookId) {
-        // Grava no cache instantâneo e no banco pesado
-        localStorage.setItem('cfi_v6_' + currentBookId, localizacaoExata);
-        currentLocationCfi = localizacaoExata;
+        // Grava nos dois lugares
+        SafeStorage.set('cfi_v6_' + currentBookId, localizacaoExata);
+        await salvarCfiNoMetadata(currentBookId, localizacaoExata);
         
-        const library = await localforage.getItem('library_metadata');
-        if (library) {
-            const bookIndex = library.findIndex(b => b.id === currentBookId);
-            if (bookIndex !== -1) {
-                library[bookIndex].cfi = localizacaoExata;
-                await localforage.setItem('library_metadata', library);
-            }
-        }
-
         DOM.btnBookmark.classList.add('saved');
         DOM.btnBookmark.textContent = '✔ Salvo';
+        
+        // Feedback visual temporário
+        setTimeout(() => {
+            DOM.btnBookmark.classList.remove('saved');
+            DOM.btnBookmark.textContent = '📍';
+        }, 2000);
     }
 });
 
-// Auto-Save do iOS se matar o app
+// Auto-Save quando o app vai pro background (iOS)
 document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState === 'hidden' && currentBookId && currentLocationCfi) {
-        localStorage.setItem('cfi_v6_' + currentBookId, currentLocationCfi);
+        SafeStorage.set('cfi_v6_' + currentBookId, currentLocationCfi);
+        await salvarCfiNoMetadata(currentBookId, currentLocationCfi);
+    }
+});
+
+// NOVO: Salva antes de fechar/recarregar a página
+window.addEventListener('beforeunload', () => {
+    if (currentBookId && currentLocationCfi) {
+        SafeStorage.set('cfi_v6_' + currentBookId, currentLocationCfi);
     }
 });
 
 async function fecharLivro() {
     if (currentBookId && currentLocationCfi) {
-        localStorage.setItem('cfi_v6_' + currentBookId, currentLocationCfi);
+        SafeStorage.set('cfi_v6_' + currentBookId, currentLocationCfi);
+        await salvarCfiNoMetadata(currentBookId, currentLocationCfi);
     }
 
     if (book) { book.destroy(); book = null; rendition = null; }
     document.getElementById('viewer').innerHTML = '';
     currentBookId = null;
     currentLocationCfi = null;
+    isLocationsReady = false;
     
     DOM.reader.classList.add('hidden');
     DOM.library.classList.remove('hidden');
@@ -309,30 +399,27 @@ function gerarSumario() {
 }
 
 DOM.progressSlider.addEventListener('change', (e) => {
-    if (book && book.locations.length > 0) {
+    if (book && book.locations && book.locations.length > 0) {
         const percent = e.target.value / 100;
         const targetCfi = book.locations.cfiFromPercentage(percent);
-        rendition.display(targetCfi);
+        if (targetCfi) rendition.display(targetCfi);
     }
 });
 
 // ==========================================
-// 4. O SEGREDO DO "RESPIRO" REFEITO PARA O CFI FUNCIONAR
+// 4. CONFIGURAÇÕES DE LAYOUT
 // ==========================================
 
 async function alterarConfiguracaoLayout(callback) {
-    const cfiAtual = rendition.currentLocation() ? rendition.currentLocation().start.cfi : currentLocationCfi;
+    const cfiAtual = currentLocationCfi;
     
     callback(); 
     carregarUIConfigs();
     salvarConfigs(); 
     
     if (rendition) {
-        // Redimensiona o motor com as novas margens e reposiciona
         rendition.resize();
         if (cfiAtual) await rendition.display(cfiAtual);
-        
-        // Atualiza a paginação X de Y
         gerarPaginasParaInterface(cfiAtual);
     }
 }
@@ -359,12 +446,10 @@ function aplicarEstilosNoMotor() {
 
     rendition.themes.fontSize(`${settings.size}%`);
 
-    // A MÁGICA AQUI: O padding que o usuário escolhe agora vai pra DIV de fora (o vidro da tela)
     const viewerDiv = document.getElementById('viewer');
     viewerDiv.style.paddingTop = `${settings.paddingY}px`;
     viewerDiv.style.paddingBottom = `${settings.paddingY}px`;
 
-    // E aqui por dentro da página, fica ZERO absoluto. O Scanner funciona perfeito.
     rendition.themes.default({
         "body": {
             "font-family": settings.font === 'Original' ? "inherit !important" : `${settings.font} !important`,
@@ -390,7 +475,7 @@ function aplicarEstilosNoMotor() {
 }
 
 function salvarConfigs() {
-    localStorage.setItem('reader_v6_configs', JSON.stringify(settings));
+    SafeStorage.set('reader_v6_configs', JSON.stringify(settings));
     aplicarEstilosNoMotor();
 }
 
