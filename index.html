@@ -10,6 +10,10 @@
     
     <link rel="stylesheet" href="style.css">
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,700&display=swap" rel="stylesheet">
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.5/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
@@ -42,10 +46,10 @@
             
             <div id="tab-texto" class="tab-content active">
                 <div class="font-carousel">
-                    <button class="font-btn" data-font="Original"><div class="circle">A</div><span>Original</span></button>
-                    <button class="font-btn" data-font="Helvetica"><div class="circle">A</div><span>Helvetica</span></button>
-                    <button class="font-btn" data-font="Verdana"><div class="circle">A</div><span>Verdana</span></button>
-                    <button class="font-btn" data-font="Georgia"><div class="circle">A</div><span>Georgia</span></button>
+                    <button class="font-btn" data-font="Original"><div class="circle">O</div><span>Original</span></button>
+                    <button class="font-btn selected" data-font="'Literata', serif"><div class="circle literata-circle">L</div><span>Literata</span></button>
+                    <button class="font-btn" data-font="Helvetica, sans-serif"><div class="circle">A</div><span>Helvetica</span></button>
+                    <button class="font-btn" data-font="Georgia, serif"><div class="circle">A</div><span>Georgia</span></button>
                 </div>
                 
                 <div class="controls-row">
@@ -54,10 +58,6 @@
                         <span id="font-size-display">100%</span>
                         <button id="btn-font-plus">T+</button>
                     </div>
-                    <select id="text-align-select">
-                        <option value="justify">Justificado</option>
-                        <option value="left">Esquerda</option>
-                    </select>
                 </div>
             </div>
 
@@ -69,7 +69,7 @@
                 </div>
                 <div class="theme-carousel">
                     <button class="theme-color-btn light" data-theme="light"></button>
-                    <button class="theme-color-btn sepia" data-theme="sepia"></button>
+                    <button class="theme-color-btn sepia selected" data-theme="sepia"></button>
                     <button class="theme-color-btn dark" data-theme="dark"></button>
                 </div>
             </div>
