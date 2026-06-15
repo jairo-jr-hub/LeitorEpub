@@ -20,7 +20,7 @@ let rendition = null;
 let currentBookId = null;
 let currentLocationCfi = null; 
 let totalPages = 1;
-let isLocationsReady = false; // NOVO: flag para saber se a paginação está pronta
+let isLocationsReady = false;
 
 let settings = JSON.parse(localStorage.getItem('reader_v6_configs')) || {
     font: "'Literata', serif",
@@ -155,8 +155,23 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. MOTOR DE LEITURA (CORRIGIDO)
+// 2. MOTOR DE LEITURA (CORRIGIDO V7)
 // ==========================================
+
+// FUNÇÃO CENTRAL: Pega o CFI real da página atual AGORA
+function getCurrentCfi() {
+    if (!rendition) return null;
+    try {
+        const loc = rendition.currentLocation();
+        if (loc && loc.start && loc.start.cfi) {
+            return loc.start.cfi;
+        }
+    } catch (e) {
+        console.warn('Erro ao pegar currentLocation:', e);
+    }
+    return currentLocationCfi; // fallback para o último conhecido
+}
+
 async function abrirLivro(bookId) {
     currentBookId = bookId;
     currentLocationCfi = null;
@@ -195,60 +210,54 @@ async function abrirLivro(bookId) {
         aplicarEstilosNoMotor();
         gerarSumario();
         
-        // CORREÇÃO: Prioriza o CFI salvo no localforage (mais confiável no iOS)
-        let cfiSalvo = null;
-        
-        // 1. Tenta localStorage primeiro (rápido)
-        cfiSalvo = SafeStorage.get('cfi_v6_' + bookId);
-        
-        // 2. Se não achou, tenta o metadata do livro (persistente no localforage)
+        // Recupera CFI salvo (prioriza localStorage, fallback para metadata)
+        let cfiSalvo = SafeStorage.get('cfi_v6_' + bookId);
         if (!cfiSalvo) {
             const library = await localforage.getItem('library_metadata');
             const bookMeta = library ? library.find(b => b.id === bookId) : null;
-            if (bookMeta && bookMeta.cfi) {
-                cfiSalvo = bookMeta.cfi;
-            }
+            if (bookMeta && bookMeta.cfi) cfiSalvo = bookMeta.cfi;
         }
         
         try {
             if (cfiSalvo) {
                 await rendition.display(cfiSalvo);
-                currentLocationCfi = cfiSalvo;
+                currentLocationCfi = getCurrentCfi() || cfiSalvo;
             } else {
                 await rendition.display();
-                const loc = rendition.currentLocation();
-                currentLocationCfi = loc && loc.start ? loc.start.cfi : null;
+                currentLocationCfi = getCurrentCfi();
             }
         } catch(e) {
             await rendition.display();
-            const loc = rendition.currentLocation();
-            currentLocationCfi = loc && loc.start ? loc.start.cfi : null;
+            currentLocationCfi = getCurrentCfi();
         }
 
         // Gera paginação em background
         gerarPaginasParaInterface(currentLocationCfi);
 
-        // CORREÇÃO: Usa o parâmetro 'location' do evento, não rendition.location
+        // ==========================================
+        // EVENTOS DE NAVEGAÇÃO (CORRIGIDO)
+        // ==========================================
+        
+        // EVENTO 'relocated': dispara quando MUDA DE SEÇÃO/CAPÍTULO
         rendition.on('relocated', (location) => {
             DOM.btnBookmark.classList.remove('saved');
             DOM.btnBookmark.textContent = '📍';
             
-            // Só atualiza se location for válido
             if (location && location.start && location.start.cfi) {
                 currentLocationCfi = location.start.cfi;
-                
-                // Atualiza UI de página SÓ se a paginação já estiver pronta
-                if (isLocationsReady) {
-                    atualizarInterfaceDePagina(currentLocationCfi);
-                } else {
-                    DOM.progressLabel.textContent = "Calculando páginas...";
-                }
-                
-                // Salva no localStorage (com fallback silencioso)
+                atualizarTudo(currentLocationCfi);
+            }
+        });
+
+        // EVENTO 'pageChanged': dispara a CADA VIRADA DE PÁGINA (mesmo no mesmo capítulo)
+        // Isso é o que faltava! O 'relocated' sozinho não captura viradas dentro do mesmo capítulo.
+        rendition.on('pageChanged', (data) => {
+            // Força atualização do CFI a cada mudança de página
+            const cfiAtual = getCurrentCfi();
+            if (cfiAtual) {
+                currentLocationCfi = cfiAtual;
+                // Salva silenciosamente a cada virada de página
                 SafeStorage.set('cfi_v6_' + currentBookId, currentLocationCfi);
-                
-                // Salva também no metadata do livro (backup persistente)
-                salvarCfiNoMetadata(currentBookId, currentLocationCfi);
             }
         });
 
@@ -259,7 +268,23 @@ async function abrirLivro(bookId) {
     }
 }
 
-// NOVO: Salva CFI no metadata do livro no localforage (persistente)
+// Atualiza interface E salva de forma centralizada
+function atualizarTudo(cfi) {
+    if (!cfi) return;
+    
+    // Salva no localStorage
+    SafeStorage.set('cfi_v6_' + currentBookId, cfi);
+    // Salva também no metadata (backup persistente no localforage)
+    salvarCfiNoMetadata(currentBookId, cfi);
+    
+    // Atualiza UI de página
+    if (isLocationsReady) {
+        atualizarInterfaceDePagina(cfi);
+    } else {
+        DOM.progressLabel.textContent = "Calculando páginas...";
+    }
+}
+
 async function salvarCfiNoMetadata(bookId, cfi) {
     try {
         const library = await localforage.getItem('library_metadata');
@@ -281,7 +306,7 @@ function gerarPaginasParaInterface(cfiAtual) {
     
     book.locations.generate(charsPorPagina).then(() => {
         totalPages = book.locations.length || 1;
-        isLocationsReady = true; // MARCA COMO PRONTO
+        isLocationsReady = true;
         atualizarInterfaceDePagina(cfiAtual);
     }).catch(err => {
         console.warn('Erro ao gerar locations:', err);
@@ -293,7 +318,6 @@ function gerarPaginasParaInterface(cfiAtual) {
 function atualizarInterfaceDePagina(cfi) {
     if (!cfi) return;
     
-    // Só calcula se book.locations estiver pronto
     if (book && book.locations && book.locations.length > 0) {
         try {
             const percent = book.locations.percentageFromCfi(cfi);
@@ -309,47 +333,61 @@ function atualizarInterfaceDePagina(cfi) {
 }
 
 // ==========================================
-// SALVAMENTO MANUAL ABSOLUTO V6 (CORRIGIDO)
+// SALVAMENTO MANUAL ABSOLUTO V7 (CORRIGIDO)
 // ==========================================
 DOM.btnBookmark.addEventListener('click', async () => {
-    // CORREÇÃO: Usa currentLocationCfi que sempre é atualizado pelo 'relocated'
-    const localizacaoExata = currentLocationCfi;
+    // CORREÇÃO CRÍTICA: Pega o CFI DA PÁGINA ATUAL AGORA, não do evento 'relocated'
+    const localizacaoExata = getCurrentCfi();
 
     if (localizacaoExata && currentBookId) {
-        // Grava nos dois lugares
+        currentLocationCfi = localizacaoExata;
+        
+        // Salva nos dois lugares
         SafeStorage.set('cfi_v6_' + currentBookId, localizacaoExata);
         await salvarCfiNoMetadata(currentBookId, localizacaoExata);
         
         DOM.btnBookmark.classList.add('saved');
         DOM.btnBookmark.textContent = '✔ Salvo';
         
-        // Feedback visual temporário
         setTimeout(() => {
             DOM.btnBookmark.classList.remove('saved');
             DOM.btnBookmark.textContent = '📍';
         }, 2000);
+    } else {
+        // Feedback de erro se não conseguir pegar o CFI
+        DOM.btnBookmark.textContent = '❌ Erro';
+        setTimeout(() => {
+            DOM.btnBookmark.textContent = '📍';
+        }, 1500);
     }
 });
 
 // Auto-Save quando o app vai pro background (iOS)
 document.addEventListener("visibilitychange", async () => {
-    if (document.visibilityState === 'hidden' && currentBookId && currentLocationCfi) {
-        SafeStorage.set('cfi_v6_' + currentBookId, currentLocationCfi);
-        await salvarCfiNoMetadata(currentBookId, currentLocationCfi);
+    if (document.visibilityState === 'hidden' && currentBookId) {
+        const cfi = getCurrentCfi();
+        if (cfi) {
+            SafeStorage.set('cfi_v6_' + currentBookId, cfi);
+            await salvarCfiNoMetadata(currentBookId, cfi);
+        }
     }
 });
 
-// NOVO: Salva antes de fechar/recarregar a página
+// Salva antes de fechar/recarregar a página
 window.addEventListener('beforeunload', () => {
-    if (currentBookId && currentLocationCfi) {
-        SafeStorage.set('cfi_v6_' + currentBookId, currentLocationCfi);
+    if (currentBookId) {
+        const cfi = getCurrentCfi();
+        if (cfi) SafeStorage.set('cfi_v6_' + currentBookId, cfi);
     }
 });
 
 async function fecharLivro() {
-    if (currentBookId && currentLocationCfi) {
-        SafeStorage.set('cfi_v6_' + currentBookId, currentLocationCfi);
-        await salvarCfiNoMetadata(currentBookId, currentLocationCfi);
+    if (currentBookId) {
+        const cfi = getCurrentCfi();
+        if (cfi) {
+            SafeStorage.set('cfi_v6_' + currentBookId, cfi);
+            await salvarCfiNoMetadata(currentBookId, cfi);
+        }
     }
 
     if (book) { book.destroy(); book = null; rendition = null; }
@@ -411,7 +449,7 @@ DOM.progressSlider.addEventListener('change', (e) => {
 // ==========================================
 
 async function alterarConfiguracaoLayout(callback) {
-    const cfiAtual = currentLocationCfi;
+    const cfiAtual = getCurrentCfi();
     
     callback(); 
     carregarUIConfigs();
