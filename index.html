@@ -33,18 +33,17 @@
     <div id="reader-view" class="hidden">
         
         <div id="top-bar" class="ui-bar hidden">
-            <button id="btn-back" class="icon-btn">✕</button>
+            <button id="btn-back" class="icon-btn">‹ Sair</button>
+            <div class="top-bar-center">
+                <button id="btn-open-toc" class="icon-btn toc-trigger">☰ Capítulos</button>
+            </div>
             <div class="top-bar-right">
-                <button id="btn-bookmark" class="icon-btn highlight-btn">📍 Salvar Posição</button>
-                <button id="btn-settings" class="icon-btn font-weight-bold" style="font-size: 20px;">Aa</button>
+                <button id="btn-bookmark" class="icon-btn highlight-btn">📍</button>
+                <button id="btn-settings" class="icon-btn font-weight-bold" style="font-size: 18px;">Aa</button>
             </div>
         </div>
 
         <div id="toc-modal" class="hidden">
-            <div class="modal-header">
-                <h2>Sumário</h2>
-                <button id="btn-close-toc" class="icon-btn">✕</button>
-            </div>
             <ul id="toc-list"></ul>
         </div>
 
@@ -99,8 +98,9 @@
         </div>
 
         <div id="viewer"></div>
-        <div id="brightness-overlay"></div> <div id="bottom-bar" class="ui-bar hidden">
-            <button id="btn-open-toc" class="icon-btn">☰</button>
+        <div id="brightness-overlay"></div>
+
+        <div id="bottom-bar" class="ui-bar hidden">
             <input type="range" id="progress-slider" min="0" max="100" value="0" step="0.1">
             <span id="progress-label">Calculando...</span>
         </div>
