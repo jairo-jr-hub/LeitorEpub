@@ -10,9 +10,8 @@ let rendition = null;
 // Configurações persistentes inspiradas no Play Livros
 let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
     fontSize: 100,
-    // Começa com a fonte nativa do Play Livros carregada via Google Fonts
     fontFamily: "'Literata', serif", 
-    theme: 'sepia', // Começa no Sépia quente nativo
+    theme: 'sepia', 
     brightness: 100
 };
 
@@ -21,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initUIEvents();
 });
 
-// --- BIBLIOTECA (IndexedDB via LocalForage) ---
+// --- BIBLIOTECA ---
 async function loadLibrary() {
     bookshelf.innerHTML = '';
     const library = await localforage.getItem('library_metadata') || [];
@@ -38,7 +37,7 @@ async function loadLibrary() {
 
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
-        deleteBtn.innerHTML = '✕'; // Ícone ✕ para excluir
+        deleteBtn.innerHTML = '✕'; 
         deleteBtn.onclick = async (e) => {
             e.stopPropagation();
             if (confirm(`Excluir permanentemente o livro "${bookMeta.title}" do leitor?`)) {
@@ -118,37 +117,23 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
-        // Configuração dos Temas Nativos (Hexadecimais exatos do Play Livros)
         rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
-        // Sépia ajustado: fundo mais creme (#f4ecd8) e fonte marrom nativa forte (#26180f)
         rendition.themes.register("sepia", { "body": { "background": "#f4ecd8 !important", "color": "#26180f !important" }});
         rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
         
         rendition.themes.select(readerSettings.theme);
         rendition.themes.fontSize(readerSettings.fontSize + "%");
         
-        // Aplica a Literata como fonte nativa
         if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
 
-        // CORREÇÃO CRÍTICA: Injeção de Estilos Dinâmicos (Notch + PRIMEIRA FRASE FORTE)
         rendition.hooks.content.register((contents) => {
             const style = contents.document.createElement('style');
             style.id = 'epub-dynamic-styles';
-            // Injeção de padding de área segura e regra nativa para NEGRITO na PRIMEIRA LINHA
             style.innerHTML = `
                 body {
                     padding: calc(20px + env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom)) 20px !important; 
                     margin: 0 !important; 
                     background-color: transparent !important;
-                }
-                
-                /* Efeito Nativo do Play Livros: Negrito na primeira linha do primeiro parágrafo */
-                /* Caça o primeiro parágrafo verdadeiro que não tenha imagem */
-                body > p:first-of-type::first-line,
-                body > div > p:first-of-type::first-line,
-                section > p:first-of-type::first-line,
-                div[role="main"] > p:first-of-type::first-line {
-                    font-weight: 700 !important;
                 }
             `;
             contents.document.head.appendChild(style);
@@ -196,11 +181,15 @@ function fecharLivro() {
     document.getElementById('viewer').innerHTML = '';
     readerView.style.display = 'none';
     libraryView.style.display = 'block';
+    
+    // Devolve o fundo padrão da biblioteca ao fechar o livro
+    document.documentElement.style.backgroundColor = '#f5f5f7';
+    document.body.style.backgroundColor = '#f5f5f7';
     const meta = document.getElementById('theme-color-meta');
-    if (meta) meta.setAttribute('content', '#ffffff');
+    if (meta) meta.setAttribute('content', '#f5f5f7');
 }
 
-// --- INTERAÇÕES DA UI (Zonas de toque, Modal, Abas) ---
+// --- INTERAÇÕES DA UI ---
 function initUIEvents() {
     document.getElementById('zone-left').addEventListener('click', () => { if (rendition) rendition.prev(); fecharMenus(); });
     document.getElementById('zone-right').addEventListener('click', () => { if (rendition) rendition.next(); fecharMenus(); });
@@ -228,7 +217,6 @@ function initUIEvents() {
         });
     });
 
-    // Alteração de Tipografia
     document.querySelectorAll('.font-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             const fontBtn = e.currentTarget;
@@ -240,7 +228,6 @@ function initUIEvents() {
     document.getElementById('btn-font-plus').addEventListener('click', () => { readerSettings.fontSize += 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
     document.getElementById('btn-font-minus').addEventListener('click', () => { if(readerSettings.fontSize > 50) readerSettings.fontSize -= 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
 
-    // Alternador de Temas e Brilho (CORREÇÃO DE CAMUFLAGEM DO RELÓGIO)
     document.querySelectorAll('.theme-color-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             readerSettings.theme = e.target.dataset.theme;
@@ -254,24 +241,23 @@ function initUIEvents() {
     atualizarUI(); 
 }
 
-// --- ROTINAS REATIVAS (Aplicações em tempo de execução) ---
 function salvarConfig() { localStorage.setItem('reader_settings', JSON.stringify(readerSettings)); }
 
-// Função simplificada e robusta para atualizar a UI e o theme-color do navegador
 function aplicarConfiguracoesDinamicas() {
     if (!rendition) return;
     
     rendition.themes.select(readerSettings.theme);
     
-    // CORREÇÃO CRÍTICA: Camuflagem Inteligente do Relógio do iPhone (Novos Hexadecimais)
     const bgColors = { 'light': '#ffffff', 'sepia': '#f4ecd8', 'dark': '#121212' };
     const currentBgColor = bgColors[readerSettings.theme];
     
-    // Atualiza o fundo do leitor e o modal
     readerView.style.background = currentBgColor;
     settingsModal.style.background = (readerSettings.theme === 'dark') ? '#1f1f1f' : '#ffffff';
     
-    // MAGIA AQUI: Atualiza a meta tag theme-color do iPhone dinamicamente!
+    // MÁGICA DO IPHONE: Força as tags raiz a pintarem o topo (relógio) com a cor exata
+    document.documentElement.style.backgroundColor = currentBgColor;
+    document.body.style.backgroundColor = currentBgColor;
+
     const themeColorMeta = document.getElementById('theme-color-meta');
     if (themeColorMeta) {
         themeColorMeta.setAttribute('content', currentBgColor);
@@ -281,7 +267,7 @@ function aplicarConfiguracoesDinamicas() {
     if(readerSettings.fontFamily !== 'Original') {
         rendition.themes.font(readerSettings.fontFamily);
     } else {
-        rendition.themes.font(''); // Reseta para a fonte do livro
+        rendition.themes.font(''); 
     }
 
     aplicarBrilho();
@@ -298,12 +284,10 @@ function atualizarUI() {
     document.getElementById('brightness-slider').value = readerSettings.brightness;
     aplicarBrilho();
     
-    // Sincroniza botões de fonte
     document.querySelectorAll('.font-btn').forEach(btn => {
         btn.classList.toggle('selected', btn.dataset.font === readerSettings.fontFamily);
     });
     
-    // Sincroniza botões de tema
     document.querySelectorAll('.theme-color-btn').forEach(btn => {
         btn.classList.toggle('selected', btn.dataset.theme === readerSettings.theme);
     });
