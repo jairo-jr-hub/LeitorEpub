@@ -1,215 +1,421 @@
-// Estado do Leitor
-let book = null;
-let rendition = null;
-let currentTheme = 'sepia';
-let currentFont = 'Literata';
-let currentSize = 100;
+const libraryView = document.getElementById('library-view');
+const readerView = document.getElementById('reader-view');
+const bookshelf = document.getElementById('bookshelf');
+const fileInput = document.getElementById('file-input');
+const settingsModal = document.getElementById('settings-modal');
+const tocModal = document.getElementById('toc-modal');
 
-const DOM = {
-    startup: document.getElementById('startup-screen'),
-    viewer: document.getElementById('viewer'),
-    upload: document.getElementById('book-upload'),
-    topBar: document.getElementById('top-bar'),
-    bottomBar: document.getElementById('bottom-bar'),
-    settingsModal: document.getElementById('settings-modal'),
-    btnAa: document.getElementById('btn-aa'),
-    btnBack: document.getElementById('btn-back'),
-    prevPage: document.getElementById('prev-page'),
-    nextPage: document.getElementById('next-page'),
-    pageInfo: document.getElementById('page-info'),
-    tabText: document.getElementById('tab-text'),
-    tabLight: document.getElementById('tab-light'),
-    panelText: document.getElementById('panel-text'),
-    panelLight: document.getElementById('panel-light'),
-    fontBtns: document.querySelectorAll('.font-btn'),
-    themeBtns: document.querySelectorAll('.theme-btn'),
-    btnSizeUp: document.getElementById('btn-size-up'),
-    btnSizeDown: document.getElementById('btn-size-down'),
-    currentSizeTxt: document.getElementById('current-size')
+let currentBook = null;
+let rendition = null;
+let currentBookId = null;
+
+let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
+    fontSize: 100,
+    fontFamily: "'Literata', serif", 
+    theme: 'sepia', 
+    brightness: 100
 };
 
-// Carregar arquivo EPUB
-DOM.upload.addEventListener('change', function(e) {
+document.addEventListener('DOMContentLoaded', () => {
+    loadLibrary();
+    initUIEvents();
+});
+
+function fecharMenus() {
+    readerView.classList.add('ui-hidden');
+    settingsModal.classList.add('hidden');
+    tocModal.classList.add('hidden');
+}
+
+// Salva posição da leitura
+async function salvarPosicao(cfi) {
+    if (!currentBookId || !cfi) return;
+    try {
+        const library = await localforage.getItem('library_metadata') || [];
+        const bookIndex = library.findIndex(b => b.id === currentBookId);
+        if (bookIndex !== -1) {
+            library[bookIndex].cfi = cfi;
+            await localforage.setItem('library_metadata', library);
+        }
+    } catch (e) {
+        console.error("Erro ao salvar progresso:", e);
+    }
+}
+
+// Carrega estante de livros
+async function loadLibrary() {
+    bookshelf.innerHTML = '';
+    const library = await localforage.getItem('library_metadata') || [];
+    
+    if (library.length === 0) {
+        bookshelf.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #666; margin-top: 20px;">Nenhum livro salvo.</p>';
+        return;
+    }
+
+    library.forEach(bookMeta => {
+        const div = document.createElement('div');
+        div.className = 'book-item';
+        div.onclick = () => openBook(bookMeta.id);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete-btn';
+        deleteBtn.innerHTML = '✕'; 
+        deleteBtn.onclick = async (e) => {
+            e.stopPropagation();
+            if (confirm(`Excluir permanentemente "${bookMeta.title}"?`)) {
+                await localforage.removeItem(bookMeta.id);
+                const novaBiblioteca = library.filter(b => b.id !== bookMeta.id);
+                await localforage.setItem('library_metadata', novaBiblioteca);
+                loadLibrary();
+            }
+        };
+
+        const img = document.createElement('img');
+        img.className = 'book-cover';
+        img.src = bookMeta.cover || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="%23eee"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23999">Sem Capa</text></svg>';
+        
+        const title = document.createElement('div');
+        title.className = 'book-title';
+        title.textContent = bookMeta.title;
+
+        div.appendChild(deleteBtn);
+        div.appendChild(img);
+        div.appendChild(title);
+        bookshelf.appendChild(div);
+    });
+}
+
+// Upload de novo livro
+fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        initBook(e.target.result);
-    };
-    reader.readAsArrayBuffer(file);
-});
-
-function initBook(bookData) {
-    DOM.startup.classList.add('hidden');
-    DOM.viewer.classList.remove('hidden');
-
-    book = ePub(bookData);
+    const btnText = document.querySelector('.upload-btn').childNodes[0];
+    btnText.textContent = "Processando...";
     
-    // Configurações cruciais de renderização mobile
-    rendition = book.renderTo("viewer", {
-        width: "100%",
-        height: "100%",
-        spread: "none", 
-        manager: "continuous",
-        flow: "paginated",
-        snap: true
-    });
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const bookData = ePub(arrayBuffer);
+        await bookData.ready;
+        const metadata = await bookData.loaded.metadata;
+        
+        let coverBase64 = null;
+        try {
+            const coverUrl = await bookData.coverUrl();
+            if (coverUrl) {
+                const response = await fetch(coverUrl);
+                const blob = await response.blob();
+                coverBase64 = await new Promise(res => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => res(reader.result);
+                    reader.readAsDataURL(blob);
+                });
+            }
+        } catch(e) {}
 
-    // Garante que o iframe do livro conheça e use a fonte Literata
-    rendition.hooks.content.register(function(contents) {
-        contents.addStylesheet("https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap");
-    });
+        const bookId = 'book_' + Date.now();
+        await localforage.setItem(bookId, arrayBuffer);
+        const library = await localforage.getItem('library_metadata') || [];
+        library.push({ id: bookId, title: metadata.title, cover: coverBase64, cfi: null });
+        await localforage.setItem('library_metadata', library);
+        await loadLibrary();
+    } catch (error) { alert("Erro ao processar o arquivo."); } 
+    finally {
+        btnText.textContent = "Adicionar EPUB";
+        fileInput.value = '';
+    }
+});
 
-    // Mapear os temas no motor do epub.js
-    rendition.themes.register("light", { "body": { "background": "#FFFFFF", "color": "#000000" }});
-    rendition.themes.register("sepia", { "body": { "background": "#FDF7EC", "color": "#3B2A19" }});
-    rendition.themes.register("dark",  { "body": { "background": "#000000", "color": "#A3A3A3" }});
+// Abrir Livro e Renderizar
+async function openBook(bookId) {
+    currentBookId = bookId;
+    libraryView.style.display = 'none';
+    readerView.style.display = 'block';
+    fecharMenus(); 
 
-    applySettings();
+    try {
+        const arrayBuffer = await localforage.getItem(bookId);
+        currentBook = ePub(arrayBuffer);
+        
+        rendition = currentBook.renderTo('viewer', {
+            width: '100%',
+            height: '100%',
+            spread: 'none',
+            manager: 'continuous',
+            flow: 'paginated'
+        });
+
+        // Configuração nativa de temas no epub.js
+        rendition.themes.register("light", { "body": { "background": "#ffffff !important" }});
+        rendition.themes.register("sepia", { "body": { "background": "#fefbec !important" }});
+        rendition.themes.register("dark", { "body": { "background": "#121212 !important" }});
+        
+        // Sempre que uma página/capítulo for carregado, aplica nosso motor de estilos
+        rendition.hooks.content.register((contents) => {
+            aplicarEstilosNoConteudo(contents);
+        });
+
+        aplicarConfiguracoesDinamicas();
+
+        const library = await localforage.getItem('library_metadata');
+        const bookMeta = library.find(b => b.id === bookId);
+        
+        if (bookMeta && bookMeta.cfi) {
+            try { await rendition.display(bookMeta.cfi); } catch(e) { await rendition.display(); }
+        } else {
+            await rendition.display();
+        }
+
+        // Gera Sumário
+        currentBook.loaded.navigation.then(nav => {
+            const tocList = document.getElementById('toc-list');
+            tocList.innerHTML = '';
+            
+            const generateToc = (items, level = 0) => {
+                items.forEach(chapter => {
+                    const li = document.createElement('li');
+                    li.className = 'toc-item';
+                    li.style.paddingLeft = `${level * 20}px`;
+                    li.textContent = chapter.label.trim() || 'Capítulo';
+                    
+                    li.onclick = () => {
+                        rendition.display(chapter.href);
+                        fecharMenus(); 
+                    };
+                    tocList.appendChild(li);
+                    if (chapter.subitems && chapter.subitems.length > 0) generateToc(chapter.subitems, level + 1);
+                });
+            };
+            if (nav.toc) generateToc(nav.toc);
+        });
+
+        // Paginação e Progresso
+        currentBook.ready.then(() => currentBook.locations.generate(1600)).then(() => {
+            atualizarProgressoVisual(rendition.location.start.cfi);
+        });
+
+        rendition.on('relocated', async (location) => {
+            document.getElementById('btn-bookmark').classList.remove('saved'); 
+            if (location && location.start && location.start.cfi) {
+                await salvarPosicao(location.start.cfi); 
+                atualizarProgressoVisual(location.start.cfi);
+            }
+        });
+
+    } catch (e) { fecharLivro(); }
+}
+
+function atualizarProgressoVisual(cfi) {
+    if(currentBook && currentBook.locations.length > 0 && cfi) {
+        const percentage = currentBook.locations.percentageFromCfi(cfi);
+        const calc = Math.round(percentage * 100);
+        document.getElementById('progress-slider').value = calc;
+        document.getElementById('page-info').textContent = `${calc}%`;
+    }
+}
+
+function fecharLivro() {
+    currentBookId = null;
+    if (currentBook) { currentBook.destroy(); currentBook = null; rendition = null; }
+    document.getElementById('viewer').innerHTML = '';
+    readerView.style.display = 'none';
+    libraryView.style.display = 'block';
     
-    rendition.display().then(() => {
-        updatePageInfo();
-        generateLocations(); 
+    document.documentElement.style.backgroundColor = '#f5f5f7';
+    document.body.style.backgroundColor = '#f5f5f7';
+    const meta = document.getElementById('theme-color-meta');
+    if (meta) meta.setAttribute('content', '#f5f5f7');
+}
+
+// Eventos dos Botões
+function initUIEvents() {
+    // Áreas de toque
+    document.getElementById('zone-left').addEventListener('click', () => { if (rendition) rendition.prev(); fecharMenus(); });
+    document.getElementById('zone-right').addEventListener('click', () => { if (rendition) rendition.next(); fecharMenus(); });
+    document.getElementById('zone-center').addEventListener('click', () => {
+        const isHidden = readerView.classList.contains('ui-hidden');
+        if (isHidden) readerView.classList.remove('ui-hidden');
+        else fecharMenus();
     });
 
-    // Eventos de Toque e Swipe
-    rendition.on('click', handleViewerClick);
-    rendition.on('touchstart', handleTouchStart);
-    rendition.on('touchend', handleTouchEnd);
-    rendition.on('relocated', updatePageInfo);
-}
-
-// Suporte a Swipe (Arrastar para o lado)
-let touchStartX = 0;
-let touchEndX = 0;
-
-function handleTouchStart(e) {
-    touchStartX = e.changedTouches[0].screenX;
-}
-
-function handleTouchEnd(e) {
-    touchEndX = e.changedTouches[0].screenX;
-    const diff = touchEndX - touchStartX;
-    if (Math.abs(diff) > 40) {
-        if (diff > 0) rendition.prev();
-        else rendition.next();
-    }
-}
-
-// Toque nas bordas para passar página ou centro para abrir Menu
-function handleViewerClick(e) {
-    const screenWidth = window.innerWidth;
-    const clickX = e.clientX || (e.changedTouches && e.changedTouches[0].clientX);
-    if (!clickX) return;
-
-    if (clickX > screenWidth * 0.3 && clickX < screenWidth * 0.7) {
-        toggleUI();
-    } else if (clickX <= screenWidth * 0.3) {
-        rendition.prev();
-    } else {
-        rendition.next();
-    }
-}
-
-function toggleUI() {
-    const isVisible = DOM.topBar.classList.contains('visible');
-    if (isVisible) {
-        DOM.topBar.classList.remove('visible');
-        DOM.bottomBar.classList.remove('visible');
-        DOM.settingsModal.classList.remove('visible');
-    } else {
-        DOM.topBar.classList.add('visible');
-        DOM.bottomBar.classList.add('visible');
-    }
-}
-
-DOM.btnBack.addEventListener('click', () => location.reload()); // Reseta o app para ler outro
-DOM.btnAa.addEventListener('click', () => DOM.settingsModal.classList.toggle('visible'));
-DOM.prevPage.addEventListener('click', () => rendition && rendition.prev());
-DOM.nextPage.addEventListener('click', () => rendition && rendition.next());
-
-// Alternar Abas (Texto / Iluminação)
-DOM.tabText.addEventListener('click', () => {
-    DOM.tabText.classList.add('active');
-    DOM.tabLight.classList.remove('active');
-    DOM.panelText.classList.remove('hidden');
-    DOM.panelLight.classList.add('hidden');
-});
-
-DOM.tabLight.addEventListener('click', () => {
-    DOM.tabLight.classList.add('active');
-    DOM.tabText.classList.remove('active');
-    DOM.panelLight.classList.remove('hidden');
-    DOM.panelText.classList.add('hidden');
-});
-
-// Alterar Fontes
-DOM.fontBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-        DOM.fontBtns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentFont = btn.dataset.font;
-        applySettings();
+    document.getElementById('btn-back').addEventListener('click', fecharLivro);
+    
+    document.getElementById('btn-bookmark').addEventListener('click', async () => {
+        if (rendition && rendition.location && rendition.location.start) {
+            await salvarPosicao(rendition.location.start.cfi);
+            document.getElementById('btn-bookmark').classList.add('saved');
+        }
     });
-});
 
-// Alterar Tamanho da Letra
-DOM.btnSizeUp.addEventListener('click', () => {
-    if (currentSize < 200) currentSize += 10;
-    DOM.currentSizeTxt.textContent = `${currentSize}%`;
-    applySettings();
-});
-
-DOM.btnSizeDown.addEventListener('click', () => {
-    if (currentSize > 60) currentSize -= 10;
-    DOM.currentSizeTxt.textContent = `${currentSize}%`;
-    applySettings();
-});
-
-// Alterar Tema de Cor
-DOM.themeBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-        DOM.themeBtns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentTheme = btn.dataset.theme;
-        document.body.className = `theme-${currentTheme}`;
-        applySettings();
+    document.getElementById('btn-aa').addEventListener('click', () => {
+        tocModal.classList.add('hidden');
+        settingsModal.classList.toggle('hidden');
     });
-});
 
-// Força Justificação e Estilos idênticos ao Play Livros
-function applySettings() {
+    document.getElementById('btn-toc').addEventListener('click', () => {
+        settingsModal.classList.add('hidden');
+        tocModal.classList.toggle('hidden');
+    });
+
+    // Abas
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            e.target.classList.add('active');
+            document.getElementById(`tab-${e.target.dataset.tab}`).classList.add('active');
+        });
+    });
+
+    // Fontes
+    document.querySelectorAll('.font-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            readerSettings.fontFamily = e.currentTarget.dataset.font;
+            aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig();
+        });
+    });
+
+    // Tamanho
+    document.getElementById('btn-font-plus').addEventListener('click', () => { readerSettings.fontSize += 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
+    document.getElementById('btn-font-minus').addEventListener('click', () => { if(readerSettings.fontSize > 50) readerSettings.fontSize -= 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
+
+    // Temas
+    document.querySelectorAll('.theme-color-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            readerSettings.theme = e.target.dataset.theme;
+            aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig();
+        });
+    });
+
+    document.getElementById('brightness-slider').addEventListener('input', (e) => { readerSettings.brightness = e.target.value; aplicarBrilho(); salvarConfig(); });
+
+    atualizarUI(); 
+}
+
+function salvarConfig() { localStorage.setItem('reader_settings', JSON.stringify(readerSettings)); }
+
+// Aplica as cores principais e tamanhos
+function aplicarConfiguracoesDinamicas() {
     if (!rendition) return;
-    rendition.themes.select(currentTheme);
+    rendition.themes.select(readerSettings.theme);
+    
+    // Matriz exata de Cores
+    const bgColors = { 'light': '#ffffff', 'sepia': '#fefbec', 'dark': '#121212' };
+    const textColors = { 'light': '#1d1d1f', 'sepia': '#3B2A19', 'dark': '#e0e0e0' }; // #3B2A19 é o marrom escuro da sua print
+    const firstPhraseColors = { 'light': '#000000', 'sepia': '#110c07', 'dark': '#ffffff' }; // Marrom quase preto para a primeira frase
+    
+    const currentBg = bgColors[readerSettings.theme];
+    const currentText = textColors[readerSettings.theme];
+    const currentHighlight = firstPhraseColors[readerSettings.theme];
+    
+    readerView.style.background = currentBg;
+    settingsModal.style.background = (readerSettings.theme === 'dark') ? '#1f1f1f' : '#ffffff';
+    settingsModal.style.color = (readerSettings.theme === 'dark') ? '#ffffff' : '#333';
+    
+    tocModal.style.background = currentBg;
+    tocModal.style.color = currentText;
+
+    document.documentElement.style.backgroundColor = currentBg;
+    document.body.style.backgroundColor = currentBg;
+
+    const themeColorMeta = document.getElementById('theme-color-meta');
+    if (themeColorMeta) themeColorMeta.setAttribute('content', currentBg);
+
+    rendition.themes.fontSize(readerSettings.fontSize + "%");
+    
+    // Injeta Variáveis CSS direto no iframe para o motor caçador usar
     rendition.themes.default({
         "body": {
-            "font-family": `"${currentFont}", serif !important`,
-            "text-align": "justify !important",
-            "line-height": "1.6 !important"
+            "background-color": "transparent !important",
+            "color": `${currentText} !important`,
+            "font-family": readerSettings.fontFamily !== 'Original' ? `${readerSettings.fontFamily} !important` : "inherit",
+            "--highlight-color": currentHighlight
         },
         "p": {
             "text-align": "justify !important",
             "line-height": "1.6 !important"
         }
     });
-    rendition.themes.fontSize(`${currentSize}%`);
+    
+    aplicarBrilho();
 }
 
-// Calcula porcentagem lida
-function generateLocations() {
-    book.ready.then(() => book.locations.generate(1600)).then(() => updatePageInfo());
-}
+// O NOVO MOTOR INTELIGENTE DA PRIMEIRA FRASE
+function aplicarEstilosNoConteudo(content) {
+    const doc = content.document;
 
-function updatePageInfo() {
-    if (!book || !rendition) return;
-    const location = rendition.currentLocation();
-    if (location && location.start) {
-        if (book.locations.length > 0) {
-            const percentage = Math.round(book.locations.percentageFromCfi(location.start.cfi) * 100);
-            DOM.pageInfo.textContent = `${percentage}%`;
-        } else {
-            DOM.pageInfo.textContent = 'Calculando...';
+    // 1. Injeta a Literata direto no Iframe do livro
+    if (!doc.getElementById('literata-font-import')) {
+        const fontLink = doc.createElement('link');
+        fontLink.id = 'literata-font-import';
+        fontLink.rel = 'stylesheet';
+        fontLink.href = 'https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap';
+        doc.head.appendChild(fontLink);
+    }
+
+    // 2. Estilo específico da primeira frase
+    let style = doc.getElementById('epub-dynamic-styles');
+    if (!style) {
+        style = doc.createElement('style');
+        style.id = 'epub-dynamic-styles';
+        style.innerHTML = `
+            .play-books-first-phrase {
+                font-weight: 700 !important; 
+                color: var(--highlight-color, #000) !important;
+                /* Removido o small-caps. Agora é apenas fonte mais forte (bold) e cor mais escura */
+            }
+        `;
+        doc.head.appendChild(style);
+    }
+
+    // 3. O Caçador da Primeira Frase
+    const paragraphs = doc.querySelectorAll('p');
+    for (let i = 0; i < paragraphs.length; i++) {
+        let p = paragraphs[i];
+        
+        // Pula parágrafos vazios ou que sejam só uma imagem perdida
+        if (p.textContent.trim().length > 15) {
+            
+            // Só executa se o parágrafo ainda não foi modificado
+            if (!p.dataset.modified) {
+                let html = p.innerHTML;
+                
+                // Regex: Procura a primeira frase que acabe com . ! ou ? seguido de espaço ou quebra.
+                let match = html.match(/^(.*?[.!?])(\s|<|$)/);
+                
+                if (match && match[1]) {
+                    let primeiraFrase = match[1];
+                    let restoDoTexto = html.substring(primeiraFrase.length);
+                    
+                    // Envolve APENAS a primeira frase no span com a classe especial
+                    p.innerHTML = `<span class="play-books-first-phrase">${primeiraFrase}</span>${restoDoTexto}`;
+                    p.dataset.modified = "true";
+                } else {
+                    // Fallback de segurança se o parágrafo for bizarro sem pontuação
+                    p.innerHTML = `<span class="play-books-first-phrase">${html}</span>`;
+                    p.dataset.modified = "true";
+                }
+            }
+            // Importante: Quebra o loop para aplicar ISSO APENAS NO PRIMEIRO PARÁGRAFO DO CAPÍTULO!
+            break; 
         }
     }
+}
+
+function aplicarBrilho() {
+    const overlay = document.getElementById('brightness-overlay');
+    const darkness = 1 - (readerSettings.brightness / 100);
+    overlay.style.opacity = darkness;
+}
+
+function atualizarUI() {
+    document.getElementById('font-size-display').textContent = readerSettings.fontSize + '%';
+    document.getElementById('brightness-slider').value = readerSettings.brightness;
+    
+    document.querySelectorAll('.font-btn').forEach(btn => {
+        btn.classList.toggle('selected', btn.dataset.font === readerSettings.fontFamily);
+    });
+    
+    document.querySelectorAll('.theme-color-btn').forEach(btn => {
+        btn.classList.toggle('selected', btn.dataset.theme === readerSettings.theme);
+    });
 }
