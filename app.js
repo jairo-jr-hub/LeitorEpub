@@ -18,7 +18,7 @@ const DOM = {
 let book = null;
 let rendition = null;
 let currentBookId = null;
-let currentLocationCfi = null; // RASTREADOR: Guarda sempre a página atual!
+let currentLocationCfi = null; 
 
 let settings = JSON.parse(localStorage.getItem('reader_pro_configs')) || {
     font: "'Literata', serif",
@@ -164,7 +164,6 @@ async function abrirLivro(bookId) {
         const library = await localforage.getItem('library_metadata');
         const bookMeta = library.find(b => b.id === bookId);
         
-        // Tenta exibir a página salva. Se der erro no CFI, volta pro início.
         try {
             await rendition.display(bookMeta.cfi || undefined);
             currentLocationCfi = bookMeta.cfi || rendition.location.start.cfi;
@@ -178,10 +177,9 @@ async function abrirLivro(bookId) {
         });
         gerarSumario();
 
-        // RASTREAMENTO REAL: Salva a localização toda vez que você vira a página
         rendition.on('relocated', (location) => {
             DOM.btnBookmark.classList.remove('saved');
-            DOM.btnBookmark.textContent = '📍'; // Reseta o botão
+            DOM.btnBookmark.textContent = '📍';
             if (location && location.start) {
                 currentLocationCfi = location.start.cfi;
                 atualizarProgresso(currentLocationCfi);
@@ -194,7 +192,6 @@ async function abrirLivro(bookId) {
     }
 }
 
-// O BOTÃO DE SALVAR MANUAL
 DOM.btnBookmark.addEventListener('click', async () => {
     if (currentLocationCfi && currentBookId) {
         const library = await localforage.getItem('library_metadata');
@@ -209,9 +206,7 @@ DOM.btnBookmark.addEventListener('click', async () => {
     }
 });
 
-// A FUNÇÃO DE FECHAR O LIVRO COM AUTO-SAVE
 async function fecharLivro() {
-    // AUTO-SAVE DE SEGURANÇA: Se você sair sem salvar, ele salva pra você
     if (currentLocationCfi && currentBookId) {
         const library = await localforage.getItem('library_metadata');
         const bookIndex = library.findIndex(b => b.id === currentBookId);
@@ -308,7 +303,7 @@ function aplicarEstilosNoMotor() {
 
     rendition.themes.fontSize(`${settings.size}%`);
 
-    // AS MARGENS DE 60PX FORAM RETIRADAS DAQUI PARA FICAREM ISOLADAS NO CSS
+    // Aqui eu zerei a margem dupla (top e bottom) para o CSS do iPhone cuidar sozinho disso
     rendition.themes.default({
         "body": {
             "font-family": settings.font === 'Original' ? "inherit !important" : `${settings.font} !important`,
@@ -382,7 +377,7 @@ document.getElementById('btn-settings').addEventListener('click', () => {
     DOM.tocModal.classList.add('hidden');
     DOM.settingsModal.classList.toggle('hidden');
 });
-document.getElementById('btn-back').addEventListener('click', fecharLivro); // Auto-save ativado aqui!
+document.getElementById('btn-back').addEventListener('click', fecharLivro); 
 DOM.btnOpenToc.addEventListener('click', () => {
     DOM.settingsModal.classList.add('hidden');
     DOM.tocModal.classList.toggle('hidden');
