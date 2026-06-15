@@ -7,11 +7,12 @@ const settingsModal = document.getElementById('settings-modal');
 let currentBook = null;
 let rendition = null;
 
+// Configurações persistentes inspiradas no Play Livros
 let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
     fontSize: 100,
-    fontFamily: 'Original',
-    textAlign: 'justify', // Alinhamento salvo
-    theme: 'sepia', 
+    // Começa com a fonte nativa do Play Livros carregada via Google Fonts
+    fontFamily: "'Literata', serif", 
+    theme: 'sepia', // Começa no Sépia quente nativo
     brightness: 100
 };
 
@@ -20,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initUIEvents();
 });
 
-// --- BIBLIOTECA ---
+// --- BIBLIOTECA (IndexedDB via LocalForage) ---
 async function loadLibrary() {
     bookshelf.innerHTML = '';
     const library = await localforage.getItem('library_metadata') || [];
@@ -37,7 +38,7 @@ async function loadLibrary() {
 
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
-        deleteBtn.innerHTML = '⋮';
+        deleteBtn.innerHTML = '✕'; // Ícone ✕ para excluir
         deleteBtn.onclick = async (e) => {
             e.stopPropagation();
             if (confirm(`Excluir permanentemente o livro "${bookMeta.title}" do leitor?`)) {
@@ -66,15 +67,12 @@ async function loadLibrary() {
 fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     document.querySelector('.upload-btn').childNodes[0].textContent = "Processando...";
-
     try {
         const arrayBuffer = await file.arrayBuffer();
         const bookData = ePub(arrayBuffer);
         await bookData.ready;
         const metadata = await bookData.loaded.metadata;
-        
         let coverBase64 = null;
         try {
             const coverUrl = await bookData.coverUrl();
@@ -88,18 +86,14 @@ fileInput.addEventListener('change', async (e) => {
                 });
             }
         } catch(e) {}
-
         const bookId = 'book_' + Date.now();
         await localforage.setItem(bookId, arrayBuffer);
-
         const library = await localforage.getItem('library_metadata') || [];
         library.push({ id: bookId, title: metadata.title, cover: coverBase64, cfi: null });
         await localforage.setItem('library_metadata', library);
-
         await loadLibrary();
-    } catch (error) {
-        alert("Erro ao processar o arquivo.");
-    } finally {
+    } catch (error) { alert("Erro ao processar o arquivo."); } 
+    finally {
         document.querySelector('.upload-btn').childNodes[0].textContent = "Adicionar EPUB";
         fileInput.value = '';
     }
@@ -124,28 +118,37 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
-        // Configuração dos Temas com cores mais fortes (Inspirado no Play Livros)
+        // Configuração dos Temas Nativos (Hexadecimais exatos do Play Livros)
         rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
-        // Sépia ajustado: fundo mais creme (#f4ecd8) e fonte um marrom bem escuro/forte (#26180f)
+        // Sépia ajustado: fundo mais creme (#f4ecd8) e fonte marrom nativa forte (#26180f)
         rendition.themes.register("sepia", { "body": { "background": "#f4ecd8 !important", "color": "#26180f !important" }});
         rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
         
         rendition.themes.select(readerSettings.theme);
         rendition.themes.fontSize(readerSettings.fontSize + "%");
+        
+        // Aplica a Literata como fonte nativa
         if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
 
+        // CORREÇÃO CRÍTICA: Injeção de Estilos Dinâmicos (Notch + PRIMEIRA FRASE FORTE)
         rendition.hooks.content.register((contents) => {
             const style = contents.document.createElement('style');
             style.id = 'epub-dynamic-styles';
-            // Injeção limpa de alinhamento reativo
+            // Injeção de padding de área segura e regra nativa para NEGRITO na PRIMEIRA LINHA
             style.innerHTML = `
                 body {
                     padding: calc(20px + env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom)) 20px !important; 
                     margin: 0 !important; 
                     background-color: transparent !important;
                 }
-                body, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
-                    text-align: ${readerSettings.textAlign} !important;
+                
+                /* Efeito Nativo do Play Livros: Negrito na primeira linha do primeiro parágrafo */
+                /* Caça o primeiro parágrafo verdadeiro que não tenha imagem */
+                body > p:first-of-type::first-line,
+                body > div > p:first-of-type::first-line,
+                section > p:first-of-type::first-line,
+                div[role="main"] > p:first-of-type::first-line {
+                    font-weight: 700 !important;
                 }
             `;
             contents.document.head.appendChild(style);
@@ -185,10 +188,7 @@ async function openBook(bookId) {
             }
         });
 
-    } catch (e) {
-        console.error(e);
-        fecharLivro();
-    }
+    } catch (e) { fecharLivro(); }
 }
 
 function fecharLivro() {
@@ -196,18 +196,18 @@ function fecharLivro() {
     document.getElementById('viewer').innerHTML = '';
     readerView.style.display = 'none';
     libraryView.style.display = 'block';
-    
     const meta = document.getElementById('theme-color-meta');
     if (meta) meta.setAttribute('content', '#ffffff');
 }
 
-// --- INTERAÇÕES DA UI ---
+// --- INTERAÇÕES DA UI (Zonas de toque, Modal, Abas) ---
 function initUIEvents() {
     document.getElementById('zone-left').addEventListener('click', () => { if (rendition) rendition.prev(); fecharMenus(); });
     document.getElementById('zone-right').addEventListener('click', () => { if (rendition) rendition.next(); fecharMenus(); });
     
     document.getElementById('zone-center').addEventListener('click', () => {
-        if (readerView.classList.contains('ui-hidden')) { readerView.classList.remove('ui-hidden'); } 
+        const isHidden = readerView.classList.contains('ui-hidden');
+        if (isHidden) { readerView.classList.remove('ui-hidden'); } 
         else { fecharMenus(); }
     });
 
@@ -228,9 +228,11 @@ function initUIEvents() {
         });
     });
 
+    // Alteração de Tipografia
     document.querySelectorAll('.font-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            readerSettings.fontFamily = e.currentTarget.dataset.font;
+            const fontBtn = e.currentTarget;
+            readerSettings.fontFamily = fontBtn.dataset.font;
             aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig();
         });
     });
@@ -238,13 +240,7 @@ function initUIEvents() {
     document.getElementById('btn-font-plus').addEventListener('click', () => { readerSettings.fontSize += 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
     document.getElementById('btn-font-minus').addEventListener('click', () => { if(readerSettings.fontSize > 50) readerSettings.fontSize -= 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
 
-    // Evento de Alinhamento
-    document.getElementById('text-align-select').addEventListener('change', (e) => {
-        readerSettings.textAlign = e.target.value;
-        atualizarStylesInjetados();
-        salvarConfig();
-    });
-
+    // Alternador de Temas e Brilho (CORREÇÃO DE CAMUFLAGEM DO RELÓGIO)
     document.querySelectorAll('.theme-color-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             readerSettings.theme = e.target.dataset.theme;
@@ -258,48 +254,37 @@ function initUIEvents() {
     atualizarUI(); 
 }
 
+// --- ROTINAS REATIVAS (Aplicações em tempo de execução) ---
 function salvarConfig() { localStorage.setItem('reader_settings', JSON.stringify(readerSettings)); }
 
+// Função simplificada e robusta para atualizar a UI e o theme-color do navegador
 function aplicarConfiguracoesDinamicas() {
     if (!rendition) return;
     
     rendition.themes.select(readerSettings.theme);
     
-    // Atualização do fundo camuflado do relógio (Novas Cores)
+    // CORREÇÃO CRÍTICA: Camuflagem Inteligente do Relógio do iPhone (Novos Hexadecimais)
     const bgColors = { 'light': '#ffffff', 'sepia': '#f4ecd8', 'dark': '#121212' };
     const currentBgColor = bgColors[readerSettings.theme];
     
+    // Atualiza o fundo do leitor e o modal
     readerView.style.background = currentBgColor;
+    settingsModal.style.background = (readerSettings.theme === 'dark') ? '#1f1f1f' : '#ffffff';
     
+    // MAGIA AQUI: Atualiza a meta tag theme-color do iPhone dinamicamente!
     const themeColorMeta = document.getElementById('theme-color-meta');
-    if (themeColorMeta) themeColorMeta.setAttribute('content', currentBgColor);
+    if (themeColorMeta) {
+        themeColorMeta.setAttribute('content', currentBgColor);
+    }
 
     rendition.themes.fontSize(readerSettings.fontSize + "%");
-    if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
-    else rendition.themes.font(''); 
+    if(readerSettings.fontFamily !== 'Original') {
+        rendition.themes.font(readerSettings.fontFamily);
+    } else {
+        rendition.themes.font(''); // Reseta para a fonte do livro
+    }
 
     aplicarBrilho();
-}
-
-function atualizarStylesInjetados() {
-    if (!rendition) return;
-    try {
-        rendition.getContents().forEach(content => {
-            let style = content.document.getElementById('epub-dynamic-styles');
-            if (style) {
-                style.innerHTML = `
-                    body {
-                        padding: calc(20px + env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom)) 20px !important; 
-                        margin: 0 !important; 
-                        background-color: transparent !important;
-                    }
-                    body, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
-                        text-align: ${readerSettings.textAlign} !important;
-                    }
-                `;
-            }
-        });
-    } catch(e) { console.warn(e); }
 }
 
 function aplicarBrilho() {
@@ -310,8 +295,16 @@ function aplicarBrilho() {
 
 function atualizarUI() {
     document.getElementById('font-size-display').textContent = readerSettings.fontSize + '%';
-    document.getElementById('text-align-select').value = readerSettings.textAlign || 'justify';
     document.getElementById('brightness-slider').value = readerSettings.brightness;
     aplicarBrilho();
-    document.querySelectorAll('.font-btn').forEach(btn => { btn.classList.toggle('selected', btn.dataset.font === readerSettings.fontFamily); });
+    
+    // Sincroniza botões de fonte
+    document.querySelectorAll('.font-btn').forEach(btn => {
+        btn.classList.toggle('selected', btn.dataset.font === readerSettings.fontFamily);
+    });
+    
+    // Sincroniza botões de tema
+    document.querySelectorAll('.theme-color-btn').forEach(btn => {
+        btn.classList.toggle('selected', btn.dataset.theme === readerSettings.theme);
+    });
 }
