@@ -3,11 +3,11 @@ const readerView = document.getElementById('reader-view');
 const bookshelf = document.getElementById('bookshelf');
 const fileInput = document.getElementById('file-input');
 const settingsModal = document.getElementById('settings-modal');
+const tocModal = document.getElementById('toc-modal');
 
 let currentBook = null;
 let rendition = null;
 
-// Configurações persistentes inspiradas no Play Livros
 let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
     fontSize: 100,
     fontFamily: "'Literata', serif", 
@@ -104,6 +104,7 @@ async function openBook(bookId) {
     readerView.style.display = 'block';
     readerView.classList.add('ui-hidden');
     settingsModal.classList.add('hidden');
+    tocModal.classList.add('hidden');
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
@@ -135,6 +136,12 @@ async function openBook(bookId) {
                     margin: 0 !important; 
                     background-color: transparent !important;
                 }
+                body > p:first-of-type::first-line,
+                body > div > p:first-of-type::first-line,
+                section > p:first-of-type::first-line,
+                div[role="main"] > p:first-of-type::first-line {
+                    font-weight: 700 !important;
+                }
             `;
             contents.document.head.appendChild(style);
         });
@@ -149,6 +156,34 @@ async function openBook(bookId) {
         } else {
             await rendition.display();
         }
+
+        // NOVO: Carregamento do Sumário (Table of Contents)
+        currentBook.loaded.navigation.then(nav => {
+            const tocList = document.getElementById('toc-list');
+            tocList.innerHTML = '';
+            
+            // Função recursiva para ler capítulos e subcapítulos
+            const generateToc = (items, level = 0) => {
+                items.forEach(chapter => {
+                    const li = document.createElement('li');
+                    li.className = 'toc-item';
+                    li.style.paddingLeft = `${level * 20}px`;
+                    li.textContent = chapter.label.trim() || 'Capítulo';
+                    
+                    li.onclick = () => {
+                        rendition.display(chapter.href);
+                        fecharMenus(); // Esconde tudo e foca na leitura
+                    };
+                    tocList.appendChild(li);
+                    
+                    if (chapter.subitems && chapter.subitems.length > 0) {
+                        generateToc(chapter.subitems, level + 1);
+                    }
+                });
+            };
+            
+            if (nav.toc) generateToc(nav.toc);
+        });
 
         currentBook.ready.then(() => {
             return currentBook.locations.generate(1600);
@@ -182,7 +217,6 @@ function fecharLivro() {
     readerView.style.display = 'none';
     libraryView.style.display = 'block';
     
-    // Devolve o fundo padrão da biblioteca ao fechar o livro
     document.documentElement.style.backgroundColor = '#f5f5f7';
     document.body.style.backgroundColor = '#f5f5f7';
     const meta = document.getElementById('theme-color-meta');
@@ -201,11 +235,22 @@ function initUIEvents() {
     });
 
     document.getElementById('btn-back').addEventListener('click', fecharLivro);
-    document.getElementById('btn-aa').addEventListener('click', () => settingsModal.classList.toggle('hidden'));
+    
+    // Botões dos modais
+    document.getElementById('btn-aa').addEventListener('click', () => {
+        tocModal.classList.add('hidden');
+        settingsModal.classList.toggle('hidden');
+    });
+
+    document.getElementById('btn-toc').addEventListener('click', () => {
+        settingsModal.classList.add('hidden');
+        tocModal.classList.toggle('hidden');
+    });
 
     function fecharMenus() {
         readerView.classList.add('ui-hidden');
         settingsModal.classList.add('hidden');
+        tocModal.classList.add('hidden');
     }
 
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -249,12 +294,16 @@ function aplicarConfiguracoesDinamicas() {
     rendition.themes.select(readerSettings.theme);
     
     const bgColors = { 'light': '#ffffff', 'sepia': '#f4ecd8', 'dark': '#121212' };
+    const textColors = { 'light': '#000000', 'sepia': '#26180f', 'dark': '#e0e0e0' };
     const currentBgColor = bgColors[readerSettings.theme];
     
     readerView.style.background = currentBgColor;
     settingsModal.style.background = (readerSettings.theme === 'dark') ? '#1f1f1f' : '#ffffff';
     
-    // MÁGICA DO IPHONE: Força as tags raiz a pintarem o topo (relógio) com a cor exata
+    // Deixa o menu do Sumário com a mesma cor do leitor para dar imersão
+    tocModal.style.background = currentBgColor;
+    tocModal.style.color = textColors[readerSettings.theme];
+
     document.documentElement.style.backgroundColor = currentBgColor;
     document.body.style.backgroundColor = currentBgColor;
 
