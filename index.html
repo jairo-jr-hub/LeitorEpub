@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="theme-color" id="theme-color-meta" content="#FDF7EC">
-    <title>Leitor EPUB PRO - V8</title>
+    <title>Leitor EPUB PRO - v10</title>
     
     <link rel="stylesheet" href="style.css">
 
@@ -21,7 +21,7 @@
 
     <div id="library-view">
         <header>
-            <h1>Biblioteca <span style="font-size: 12px; background: #ea4335; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle;">v8 Fortaleza</span></h1>
+            <h1>Biblioteca <span style="font-size: 12px; background: #000; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle;">v10 Manual</span></h1>
             <label class="upload-btn" id="upload-label">
                 + Adicionar Livro
                 <input type="file" id="file-input" accept=".epub" style="display: none;" />
@@ -38,7 +38,8 @@
                 <button id="btn-open-toc" class="icon-btn toc-trigger">☰ Capítulos</button>
             </div>
             <div class="top-bar-right">
-                <button id="btn-open-bookmarks" class="icon-btn highlight-btn">📍</button>
+                <button id="btn-quick-save" class="icon-btn highlight-btn" style="background: rgba(26,115,232,0.1); border-radius: 12px; padding: 6px 12px; font-weight: bold; font-size: 14px;">Salvar</button>
+                <button id="btn-open-bookmarks" class="icon-btn" style="font-size: 18px;">📍</button>
                 <button id="btn-settings" class="icon-btn font-weight-bold" style="font-size: 18px;">Aa</button>
             </div>
         </div>
@@ -49,8 +50,7 @@
 
         <div id="bookmarks-modal" class="hidden">
             <div class="modal-header">
-                <h2>Meus Marcadores</h2>
-                <button id="btn-add-bookmark" class="btn-primary">+ Adicionar</button>
+                <h2>Progresso Salvo</h2>
             </div>
             <ul id="bookmarks-list"></ul>
         </div>
