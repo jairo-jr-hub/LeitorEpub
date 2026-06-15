@@ -20,7 +20,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initUIEvents();
 });
 
-// --- FUNÇÃO GLOBAL PARA FECHAR MENUS ---
 function fecharMenus() {
     readerView.classList.add('ui-hidden');
     settingsModal.classList.add('hidden');
@@ -124,7 +123,8 @@ async function openBook(bookId) {
         });
 
         rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
-        rendition.themes.register("sepia", { "body": { "background": "#f4ecd8 !important", "color": "#26180f !important" }});
+        // Atualizado para o creme do Play Livros
+        rendition.themes.register("sepia", { "body": { "background": "#faf6ee !important", "color": "#26180f !important" }});
         rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
         
         rendition.themes.select(readerSettings.theme);
@@ -135,12 +135,15 @@ async function openBook(bookId) {
         rendition.hooks.content.register((contents) => {
             const style = contents.document.createElement('style');
             style.id = 'epub-dynamic-styles';
-            // AUMENTO DO ESPAÇAMENTO INFERIOR DE 40px PARA 80px
+            // CSS Atualizado com antialiasing para nitidez extrema
             style.innerHTML = `
                 body {
                     padding: calc(40px + env(safe-area-inset-top)) 20px calc(80px + env(safe-area-inset-bottom)) 20px !important; 
                     margin: 0 !important; 
                     background-color: transparent !important;
+                    -webkit-font-smoothing: antialiased !important;
+                    -moz-osx-font-smoothing: grayscale !important;
+                    text-rendering: optimizeLegibility !important;
                 }
                 body > p:first-of-type::first-line,
                 body > div > p:first-of-type::first-line,
@@ -163,7 +166,7 @@ async function openBook(bookId) {
             await rendition.display();
         }
 
-        // --- CARREGAMENTO DO SUMÁRIO ---
+        // Sumário
         currentBook.loaded.navigation.then(nav => {
             const tocList = document.getElementById('toc-list');
             tocList.innerHTML = '';
@@ -291,7 +294,8 @@ function aplicarConfiguracoesDinamicas() {
     
     rendition.themes.select(readerSettings.theme);
     
-    const bgColors = { 'light': '#ffffff', 'sepia': '#f4ecd8', 'dark': '#121212' };
+    // Atualizado com o Creme #faf6ee
+    const bgColors = { 'light': '#ffffff', 'sepia': '#faf6ee', 'dark': '#121212' };
     const textColors = { 'light': '#000000', 'sepia': '#26180f', 'dark': '#e0e0e0' };
     const currentBgColor = bgColors[readerSettings.theme];
     
@@ -316,33 +320,7 @@ function aplicarConfiguracoesDinamicas() {
         rendition.themes.font(''); 
     }
 
-    atualizarStylesInjetados();
     aplicarBrilho();
-}
-
-function atualizarStylesInjetados() {
-    if (!rendition) return;
-    try {
-        rendition.getContents().forEach(content => {
-            let style = content.document.getElementById('epub-dynamic-styles');
-            if (style) {
-                // AUMENTO DO ESPAÇAMENTO INFERIOR AQUI TAMBÉM
-                style.innerHTML = `
-                    body {
-                        padding: calc(40px + env(safe-area-inset-top)) 20px calc(80px + env(safe-area-inset-bottom)) 20px !important; 
-                        margin: 0 !important; 
-                        background-color: transparent !important;
-                    }
-                    body > p:first-of-type::first-line,
-                    body > div > p:first-of-type::first-line,
-                    section > p:first-of-type::first-line,
-                    div[role="main"] > p:first-of-type::first-line {
-                        font-weight: 700 !important;
-                    }
-                `;
-            }
-        });
-    } catch(e) { console.warn(e); }
 }
 
 function aplicarBrilho() {
