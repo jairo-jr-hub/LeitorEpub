@@ -9,13 +9,16 @@ const DOM = {
     settingsModal: document.getElementById('settings-modal'),
     tocModal: document.getElementById('toc-modal'),
     tocList: document.getElementById('toc-list'),
+    bookmarksModal: document.getElementById('bookmarks-modal'),
+    bookmarksList: document.getElementById('bookmarks-list'),
     progressSlider: document.getElementById('progress-slider'),
     progressLabel: document.getElementById('progress-label'),
-    btnBookmark: document.getElementById('btn-bookmark'),
+    btnOpenBookmarks: document.getElementById('btn-open-bookmarks'),
+    btnAddBookmark: document.getElementById('btn-add-bookmark'),
     btnOpenToc: document.getElementById('btn-open-toc')
 };
 
-// Segurança Mestre para o iOS (A outra IA acertou em sugerir isso)
+// Segurança Mestra
 const SafeStorage = {
     set(key, value) { try { localStorage.setItem(key, value); return true; } catch (e) { return false; } },
     get(key) { try { return localStorage.getItem(key); } catch (e) { return null; } },
@@ -27,15 +30,10 @@ let rendition = null;
 let currentBookId = null;
 let currentLocationCfi = null; 
 let isLocationsReady = false;
+let totalPages = 1;
 
-let settings = JSON.parse(localStorage.getItem('reader_final_configs')) || {
-    font: "'Literata', serif",
-    size: 100,
-    lineHeight: 1.5,
-    align: "justify",
-    theme: "sepia",
-    brightness: 100,
-    paddingY: 60
+let settings = JSON.parse(localStorage.getItem('reader_v8_configs')) || {
+    font: "'Literata', serif", size: 100, lineHeight: 1.5, align: "justify", theme: "sepia", brightness: 100, paddingY: 60
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -67,7 +65,8 @@ async function carregarBiblioteca() {
             e.stopPropagation();
             if (confirm(`Excluir "${bookMeta.title}" do aplicativo?`)) {
                 await localforage.removeItem(bookMeta.id); 
-                SafeStorage.remove('cfi_final_' + bookMeta.id); 
+                SafeStorage.remove('cfi_v8_' + bookMeta.id); 
+                SafeStorage.remove('bookmarks_v8_' + bookMeta.id); 
                 const nova = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', nova); 
                 carregarBiblioteca();
@@ -90,16 +89,13 @@ async function carregarBiblioteca() {
 DOM.fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    
     DOM.uploadLabel.classList.add('loading');
     DOM.uploadLabel.childNodes[0].textContent = " Processando...";
-    
     try {
         const arrayBuffer = await file.arrayBuffer();
         const tempBook = ePub(arrayBuffer);
         await tempBook.ready;
         const metadata = await tempBook.loaded.metadata;
-        
         let coverBase64 = null;
         try {
             const coverUrl = await tempBook.coverUrl();
@@ -116,14 +112,11 @@ DOM.fileInput.addEventListener('change', async (e) => {
 
         const bookId = 'book_' + Date.now();
         await localforage.setItem(bookId, arrayBuffer);
-        
         const library = await localforage.getItem('library_metadata') || [];
         library.push({ id: bookId, title: metadata.title || "Livro Desconhecido", cover: coverBase64 });
         await localforage.setItem('library_metadata', library);
-        
         tempBook.destroy();
         carregarBiblioteca();
-        
     } catch (error) {
         alert("Erro. O arquivo EPUB pode estar corrompido.");
     } finally {
@@ -134,7 +127,7 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. O PARADIGMA ISOLADO (MOTOR REVISADO)
+// 2. MOTOR E SALVAMENTO (O PARADIGMA ISOLADO)
 // ==========================================
 async function abrirLivro(bookId) {
     currentBookId = bookId;
@@ -143,20 +136,15 @@ async function abrirLivro(bookId) {
     DOM.library.classList.add('hidden');
     DOM.reader.classList.remove('hidden');
     esconderMenus();
-    DOM.progressLabel.textContent = "... / ...";
+    DOM.progressLabel.textContent = "Lendo...";
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
         book = ePub(arrayBuffer);
         
-        // A MAGICA: Remover o manager="continuous" forçou o EpubJS a isolar os capítulos
-        // O Scanner agora lê as páginas com 100% de exatidão!
+        // O modo 'default' isola os capítulos para que o CFI não misture
         rendition = book.renderTo('viewer', {
-            width: '100%',
-            height: '100%',
-            spread: 'none',
-            flow: 'paginated',
-            manager: 'default'
+            width: '100%', height: '100%', spread: 'none', flow: 'paginated', manager: 'default'
         });
 
         rendition.themes.register("light", { "body": { "background": "#ffffff" }});
@@ -175,13 +163,8 @@ async function abrirLivro(bookId) {
         aplicarEstilosNoMotor();
         gerarSumario();
         
-        let cfiSalvo = SafeStorage.get('cfi_final_' + bookId);
-        if (!cfiSalvo) {
-            const library = await localforage.getItem('library_metadata');
-            const bookMeta = library.find(b => b.id === bookId);
-            if (bookMeta && bookMeta.cfi) cfiSalvo = bookMeta.cfi;
-        }
-        
+        // Tentativa de Auto-Load pra facilitar a vida
+        let cfiSalvo = SafeStorage.get('cfi_v8_' + bookId);
         try {
             if (cfiSalvo) await rendition.display(cfiSalvo);
             else await rendition.display();
@@ -191,20 +174,17 @@ async function abrirLivro(bookId) {
             currentLocationCfi = rendition.location ? rendition.location.start.cfi : null;
         }
 
-        // Gera as páginas em background de acordo com o tamanho do zoom da pessoa
         book.ready.then(() => book.locations.generate(1600)).then(() => {
             isLocationsReady = true;
+            totalPages = book.locations.length || 1;
             atualizarProgresso(currentLocationCfi);
         });
 
-        // Evento 100% Funcional e Síncrono no Modo Default
+        // Auto-Save silencioso (Fallback)
         rendition.on('relocated', (location) => {
-            DOM.btnBookmark.classList.remove('saved');
             if (location && location.start && location.start.cfi) {
                 currentLocationCfi = location.start.cfi;
-                
-                // Grava automático a cada página virada no iOS
-                SafeStorage.set('cfi_final_' + currentBookId, currentLocationCfi);
+                SafeStorage.set('cfi_v8_' + currentBookId, currentLocationCfi);
                 atualizarProgresso(currentLocationCfi);
             }
         });
@@ -215,47 +195,88 @@ async function abrirLivro(bookId) {
     }
 }
 
-// SALVAMENTO MANUAL ABSOLUTO (SEM GARGALOS)
-DOM.btnBookmark.addEventListener('click', async () => {
-    if (currentLocationCfi && currentBookId) {
-        SafeStorage.set('cfi_final_' + currentBookId, currentLocationCfi);
+// ==========================================
+// A LISTA DE MARCADORES MANUAL (O SEU PLANO B DEFINITIVO)
+// ==========================================
+
+// Carrega os marcadores daquele livro
+function carregarMarcadores() {
+    let bookmarks = JSON.parse(SafeStorage.get('bookmarks_v8_' + currentBookId)) || [];
+    DOM.bookmarksList.innerHTML = '';
+    
+    if (bookmarks.length === 0) {
+        DOM.bookmarksList.innerHTML = '<li style="justify-content:center; color:#999; font-weight:normal;">Nenhum marcador salvo ainda.</li>';
+        return;
+    }
+
+    bookmarks.forEach((bm, index) => {
+        const li = document.createElement('li');
         
-        // Cópia de Segurança Pro Banco (em background)
-        const library = await localforage.getItem('library_metadata');
-        if (library) {
-            const bookIndex = library.findIndex(b => b.id === currentBookId);
-            if (bookIndex !== -1) {
-                library[bookIndex].cfi = currentLocationCfi;
-                localforage.setItem('library_metadata', library);
+        const textSpan = document.createElement('span');
+        textSpan.textContent = bm.label;
+        textSpan.style.flex = "1";
+        textSpan.onclick = () => {
+            // CLICOU NO MARCADOR = TELETRANSPORTE DIRETO!
+            if (rendition && bm.cfi) {
+                rendition.display(bm.cfi);
             }
-        }
-        DOM.btnBookmark.classList.add('saved');
+            esconderMenus();
+        };
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'delete-bookmark';
+        delBtn.innerHTML = '✕';
+        delBtn.onclick = (e) => {
+            e.stopPropagation();
+            bookmarks.splice(index, 1);
+            SafeStorage.set('bookmarks_v8_' + currentBookId, JSON.stringify(bookmarks));
+            carregarMarcadores();
+        };
+
+        li.appendChild(textSpan);
+        li.appendChild(delBtn);
+        DOM.bookmarksList.appendChild(li);
+    });
+}
+
+// O Botão de "Adicionar" dentro do Modal de Marcadores
+DOM.btnAddBookmark.addEventListener('click', () => {
+    const loc = rendition.currentLocation();
+    const cfiExato = loc ? loc.start.cfi : currentLocationCfi;
+    
+    if (!cfiExato) {
+        alert("Aguarde a página carregar.");
+        return;
     }
+
+    let bookmarks = JSON.parse(SafeStorage.get('bookmarks_v8_' + currentBookId)) || [];
+    
+    // Cria um nome inteligente pro marcador (Ex: "Salvo em 45%")
+    let labelNome = "Página Salva";
+    if (isLocationsReady && book && book.locations.length > 0) {
+        const pct = Math.round(book.locations.percentageFromCfi(cfiExato) * 100);
+        labelNome = `Marcador (${pct}%)`;
+    } else {
+        const d = new Date();
+        labelNome = `Marcador - ${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`;
+    }
+
+    bookmarks.push({ cfi: cfiExato, label: labelNome });
+    SafeStorage.set('bookmarks_v8_' + currentBookId, JSON.stringify(bookmarks));
+    carregarMarcadores();
+
+    DOM.btnAddBookmark.textContent = "✔ Salvo!";
+    setTimeout(() => { DOM.btnAddBookmark.textContent = "+ Adicionar"; }, 2000);
 });
 
-// BLINDAGEM MÁXIMA PARA O IOS: Quando fechar/minimizar, ele salva!
-document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === 'hidden' && currentBookId && currentLocationCfi) {
-        SafeStorage.set('cfi_final_' + currentBookId, currentLocationCfi);
-    }
-});
-window.addEventListener('beforeunload', () => {
-    if (currentBookId && currentLocationCfi) {
-        SafeStorage.set('cfi_final_' + currentBookId, currentLocationCfi);
-    }
-});
-
+// Fecha e Salva
 function fecharLivro() {
     if (currentBookId && currentLocationCfi) {
-        SafeStorage.set('cfi_final_' + currentBookId, currentLocationCfi);
+        SafeStorage.set('cfi_v8_' + currentBookId, currentLocationCfi);
     }
-
     if (book) { book.destroy(); book = null; rendition = null; }
     document.getElementById('viewer').innerHTML = '';
-    currentBookId = null;
-    currentLocationCfi = null;
-    isLocationsReady = false;
-    
+    currentBookId = null; currentLocationCfi = null; isLocationsReady = false;
     DOM.reader.classList.add('hidden');
     DOM.library.classList.remove('hidden');
     document.body.style.background = '#f5f5f7';
@@ -263,7 +284,7 @@ function fecharLivro() {
 }
 
 // ==========================================
-// 3. PÁGINA X DE Y MATEMÁTICO E SUMÁRIO
+// 3. PÁGINA X DE Y MATEMÁTICO E SUMÁRIO (BONITINHO)
 // ==========================================
 function gerarSumario() {
     book.loaded.navigation.then(nav => {
@@ -273,6 +294,7 @@ function gerarSumario() {
                 const li = document.createElement('li');
                 li.textContent = chapter.label.trim();
                 
+                // RESTAURADO: O seu design favorito de sumário!
                 if (nivel > 0) {
                     li.style.paddingLeft = `${nivel * 25}px`; 
                     li.style.fontSize = "14px";
@@ -299,9 +321,7 @@ function gerarSumario() {
 function atualizarProgresso(cfi) {
     if (isLocationsReady && book && book.locations.length > 0 && cfi) {
         const percent = book.locations.percentageFromCfi(cfi);
-        const totalPages = book.locations.length;
         const currentPage = Math.max(1, Math.round(percent * totalPages));
-        
         DOM.progressSlider.value = Math.round(percent * 100);
         DOM.progressLabel.textContent = `${currentPage} / ${totalPages}`;
     }
@@ -316,24 +336,23 @@ DOM.progressSlider.addEventListener('change', (e) => {
 });
 
 // ==========================================
-// 4. TRAVA DE LAYOUT
+// 4. MOTOR DE ESTILIZAÇÃO E MENUS
 // ==========================================
 async function alterarConfiguracaoLayout(callback) {
     const cfiAtual = currentLocationCfi;
-    
     callback(); 
     carregarUIConfigs();
     salvarConfigs(); 
     
     if (rendition) {
-        rendition.resize(); // Garante as margens ajustadas
+        rendition.resize(); 
         if (cfiAtual) await rendition.display(cfiAtual);
         
-        // Quando muda a letra, apaga as paginas velhas e cria as novas sem tirar você da linha!
         DOM.progressLabel.textContent = "... / ...";
         isLocationsReady = false;
         book.locations.generate(1600).then(() => {
             isLocationsReady = true;
+            totalPages = book.locations.length || 1;
             atualizarProgresso(currentLocationCfi);
         });
     }
@@ -341,26 +360,24 @@ async function alterarConfiguracaoLayout(callback) {
 
 function aplicarEstilosNoMotor() {
     if (!rendition) return;
-
     rendition.themes.select(settings.theme);
 
     const coresBg = { 'light': '#ffffff', 'sepia': '#FDF7EC', 'dark': '#121212' };
     const coresTexto = { 'light': '#000000', 'sepia': '#2B1E12', 'dark': '#e0e0e0' };
-
     const bgCor = coresBg[settings.theme];
     const textCor = coresTexto[settings.theme];
 
-    DOM.reader.style.background = bgCor;
-    document.body.style.background = bgCor;
+    DOM.reader.style.background = bgCor; document.body.style.background = bgCor;
     document.getElementById('theme-color-meta').setAttribute('content', bgCor);
     
     DOM.settingsModal.style.background = settings.theme === 'dark' ? '#1f1f1f' : '#ffffff';
     DOM.settingsModal.style.color = settings.theme === 'dark' ? '#ffffff' : '#333';
     DOM.tocModal.style.background = settings.theme === 'dark' ? '#1f1f1f' : '#ffffff';
     DOM.tocModal.style.color = textCor;
+    DOM.bookmarksModal.style.background = settings.theme === 'dark' ? '#1f1f1f' : '#ffffff';
+    DOM.bookmarksModal.style.color = settings.theme === 'dark' ? '#ffffff' : '#333';
 
     rendition.themes.fontSize(`${settings.size}%`);
-
     const viewerDiv = document.getElementById('viewer');
     viewerDiv.style.paddingTop = `${settings.paddingY}px`;
     viewerDiv.style.paddingBottom = `${settings.paddingY}px`;
@@ -371,18 +388,10 @@ function aplicarEstilosNoMotor() {
             "text-align": `${settings.align} !important`,
             "line-height": `${settings.lineHeight} !important`,
             "color": `${textCor} !important`,
-            "padding": "0px 20px !important", 
-            "margin": "0px !important"
+            "padding": "0px 20px !important", "margin": "0px !important"
         },
-        "p": {
-            "text-align": `${settings.align} !important`,
-            "line-height": `${settings.lineHeight} !important`,
-            "margin-bottom": "1em !important"
-        },
-        "h1, h2, h3": {
-            "color": `${textCor} !important`,
-            "font-family": settings.font === 'Original' ? "inherit !important" : `${settings.font} !important`
-        }
+        "p": { "text-align": `${settings.align} !important`, "line-height": `${settings.lineHeight} !important`, "margin-bottom": "1em !important" },
+        "h1, h2, h3": { "color": `${textCor} !important`, "font-family": settings.font === 'Original' ? "inherit !important" : `${settings.font} !important` }
     });
 
     const overlay = document.getElementById('brightness-overlay');
@@ -390,7 +399,7 @@ function aplicarEstilosNoMotor() {
 }
 
 function salvarConfigs() {
-    SafeStorage.set('reader_final_configs', JSON.stringify(settings));
+    SafeStorage.set('reader_v8_configs', JSON.stringify(settings));
     aplicarEstilosNoMotor();
 }
 
@@ -401,52 +410,39 @@ function carregarUIConfigs() {
     document.getElementById('select-align').value = settings.align;
     document.getElementById('brightness-slider').value = settings.brightness;
     
-    document.querySelectorAll('.font-btn').forEach(btn => {
-        btn.classList.toggle('selected', btn.dataset.font === settings.font);
-    });
-
+    document.querySelectorAll('.font-btn').forEach(btn => { btn.classList.toggle('selected', btn.dataset.font === settings.font); });
     document.querySelectorAll('.theme-btn').forEach(btn => {
-        btn.classList.remove('active');
-        btn.textContent = '';
-        if(btn.dataset.theme === settings.theme) {
-            btn.classList.add('active');
-            btn.textContent = '✓';
-        }
+        btn.classList.remove('active'); btn.textContent = '';
+        if(btn.dataset.theme === settings.theme) { btn.classList.add('active'); btn.textContent = '✓'; }
     });
 }
 
-// Interações de Tela
+// Eventos de Menus
 document.getElementById('zone-left').addEventListener('click', () => { if (rendition) rendition.prev(); esconderMenus(); });
 document.getElementById('zone-right').addEventListener('click', () => { if (rendition) rendition.next(); esconderMenus(); });
 document.getElementById('zone-center').addEventListener('click', () => {
-    const isHidden = DOM.topBar.classList.contains('hidden');
-    if (isHidden) { 
-        DOM.topBar.classList.remove('hidden'); 
-        DOM.bottomBar.classList.remove('hidden'); 
-    } else { 
-        esconderMenus(); 
-    }
+    if (DOM.topBar.classList.contains('hidden')) { DOM.topBar.classList.remove('hidden'); DOM.bottomBar.classList.remove('hidden'); } 
+    else { esconderMenus(); }
 });
 
 function esconderMenus() {
-    DOM.topBar.classList.add('hidden');
-    DOM.bottomBar.classList.add('hidden');
-    DOM.settingsModal.classList.add('hidden');
-    DOM.tocModal.classList.add('hidden');
+    DOM.topBar.classList.add('hidden'); DOM.bottomBar.classList.add('hidden');
+    DOM.settingsModal.classList.add('hidden'); DOM.tocModal.classList.add('hidden'); DOM.bookmarksModal.classList.add('hidden');
 }
 
-// Botões
-document.getElementById('btn-settings').addEventListener('click', () => {
-    DOM.tocModal.classList.add('hidden');
-    DOM.settingsModal.classList.toggle('hidden');
-});
+// Botões Sup
 document.getElementById('btn-back').addEventListener('click', fecharLivro); 
-DOM.btnOpenToc.addEventListener('click', () => {
-    DOM.settingsModal.classList.add('hidden');
-    DOM.tocModal.classList.toggle('hidden');
+document.getElementById('btn-settings').addEventListener('click', () => { esconderMenus(); DOM.settingsModal.classList.remove('hidden'); });
+DOM.btnOpenToc.addEventListener('click', () => { esconderMenus(); DOM.tocModal.classList.remove('hidden'); });
+
+// Botão Abre Modal de Marcadores
+DOM.btnOpenBookmarks.addEventListener('click', () => {
+    esconderMenus();
+    DOM.bookmarksModal.classList.remove('hidden');
+    carregarMarcadores(); // Atualiza a lista sempre que abrir
 });
 
-// Abas de Configuração
+// Abas de Config
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -456,43 +452,14 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
-// Ações dos Controles
-document.querySelectorAll('.font-btn').forEach(btn => { 
-    btn.addEventListener('click', (e) => { 
-        alterarConfiguracaoLayout(() => { settings.font = e.currentTarget.dataset.font; }); 
-    }); 
-});
-document.getElementById('btn-size-minus').addEventListener('click', () => { 
-    alterarConfiguracaoLayout(() => { if (settings.size > 70) settings.size -= 10; }); 
-});
-document.getElementById('btn-size-plus').addEventListener('click', () => { 
-    alterarConfiguracaoLayout(() => { if (settings.size < 250) settings.size += 10; }); 
-});
-document.getElementById('btn-line-minus').addEventListener('click', () => { 
-    alterarConfiguracaoLayout(() => { if (settings.lineHeight > 1.2) settings.lineHeight = (parseFloat(settings.lineHeight) - 0.1).toFixed(1); }); 
-});
-document.getElementById('btn-line-plus').addEventListener('click', () => { 
-    alterarConfiguracaoLayout(() => { if (settings.lineHeight < 2.5) settings.lineHeight = (parseFloat(settings.lineHeight) + 0.1).toFixed(1); }); 
-});
-document.getElementById('select-align').addEventListener('change', (e) => { 
-    alterarConfiguracaoLayout(() => { settings.align = e.target.value; }); 
-});
-
-document.getElementById('btn-margin-y-minus').addEventListener('click', () => { 
-    alterarConfiguracaoLayout(() => { if (settings.paddingY > 0) settings.paddingY -= 10; }); 
-});
-document.getElementById('btn-margin-y-plus').addEventListener('click', () => { 
-    alterarConfiguracaoLayout(() => { if (settings.paddingY < 150) settings.paddingY += 10; }); 
-});
-
-document.getElementById('brightness-slider').addEventListener('input', (e) => { 
-    settings.brightness = e.target.value; 
-    salvarConfigs(); 
-});
-document.querySelectorAll('.theme-btn').forEach(btn => { 
-    btn.addEventListener('click', (e) => { 
-        settings.theme = e.target.dataset.theme; 
-        carregarUIConfigs(); 
-        salvarConfigs(); 
-    }); 
-});
+// Controles Visuais
+document.querySelectorAll('.font-btn').forEach(btn => { btn.addEventListener('click', (e) => { alterarConfiguracaoLayout(() => { settings.font = e.currentTarget.dataset.font; }); }); });
+document.getElementById('btn-size-minus').addEventListener('click', () => { alterarConfiguracaoLayout(() => { if (settings.size > 70) settings.size -= 10; }); });
+document.getElementById('btn-size-plus').addEventListener('click', () => { alterarConfiguracaoLayout(() => { if (settings.size < 250) settings.size += 10; }); });
+document.getElementById('btn-line-minus').addEventListener('click', () => { alterarConfiguracaoLayout(() => { if (settings.lineHeight > 1.2) settings.lineHeight = (parseFloat(settings.lineHeight) - 0.1).toFixed(1); }); });
+document.getElementById('btn-line-plus').addEventListener('click', () => { alterarConfiguracaoLayout(() => { if (settings.lineHeight < 2.5) settings.lineHeight = (parseFloat(settings.lineHeight) + 0.1).toFixed(1); }); });
+document.getElementById('select-align').addEventListener('change', (e) => { alterarConfiguracaoLayout(() => { settings.align = e.target.value; }); });
+document.getElementById('btn-margin-y-minus').addEventListener('click', () => { alterarConfiguracaoLayout(() => { if (settings.paddingY > 0) settings.paddingY -= 10; }); });
+document.getElementById('btn-margin-y-plus').addEventListener('click', () => { alterarConfiguracaoLayout(() => { if (settings.paddingY < 150) settings.paddingY += 10; }); });
+document.getElementById('brightness-slider').addEventListener('input', (e) => { settings.brightness = e.target.value; salvarConfigs(); });
+document.querySelectorAll('.theme-btn').forEach(btn => { btn.addEventListener('click', (e) => { settings.theme = e.target.dataset.theme; carregarUIConfigs(); salvarConfigs(); }); });
