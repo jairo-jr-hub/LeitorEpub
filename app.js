@@ -109,7 +109,7 @@ fileInput.addEventListener('change', async (e) => {
 async function openBook(bookId) {
     libraryView.style.display = 'none';
     readerView.style.display = 'block';
-    fecharMenus(); // Garante que tudo comece fechado
+    fecharMenus(); 
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
@@ -135,9 +135,10 @@ async function openBook(bookId) {
         rendition.hooks.content.register((contents) => {
             const style = contents.document.createElement('style');
             style.id = 'epub-dynamic-styles';
+            // AUMENTO DO ESPAÇAMENTO INFERIOR DE 40px PARA 80px
             style.innerHTML = `
                 body {
-                    padding: calc(20px + env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom)) 20px !important; 
+                    padding: calc(40px + env(safe-area-inset-top)) 20px calc(80px + env(safe-area-inset-bottom)) 20px !important; 
                     margin: 0 !important; 
                     background-color: transparent !important;
                 }
@@ -174,10 +175,9 @@ async function openBook(bookId) {
                     li.style.paddingLeft = `${level * 20}px`;
                     li.textContent = chapter.label.trim() || 'Capítulo';
                     
-                    // CORREÇÃO: Agora sim, ao clicar, ele fecha o menu sumário
                     li.onclick = () => {
                         rendition.display(chapter.href);
-                        fecharMenus(); // Fecha o sumário e as barras imeditamente
+                        fecharMenus(); 
                     };
                     tocList.appendChild(li);
                     
@@ -316,7 +316,33 @@ function aplicarConfiguracoesDinamicas() {
         rendition.themes.font(''); 
     }
 
+    atualizarStylesInjetados();
     aplicarBrilho();
+}
+
+function atualizarStylesInjetados() {
+    if (!rendition) return;
+    try {
+        rendition.getContents().forEach(content => {
+            let style = content.document.getElementById('epub-dynamic-styles');
+            if (style) {
+                // AUMENTO DO ESPAÇAMENTO INFERIOR AQUI TAMBÉM
+                style.innerHTML = `
+                    body {
+                        padding: calc(40px + env(safe-area-inset-top)) 20px calc(80px + env(safe-area-inset-bottom)) 20px !important; 
+                        margin: 0 !important; 
+                        background-color: transparent !important;
+                    }
+                    body > p:first-of-type::first-line,
+                    body > div > p:first-of-type::first-line,
+                    section > p:first-of-type::first-line,
+                    div[role="main"] > p:first-of-type::first-line {
+                        font-weight: 700 !important;
+                    }
+                `;
+            }
+        });
+    } catch(e) { console.warn(e); }
 }
 
 function aplicarBrilho() {
