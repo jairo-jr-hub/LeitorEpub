@@ -13,8 +13,8 @@ const DOM = {
     bookmarksList: document.getElementById('bookmarks-list'),
     progressSlider: document.getElementById('progress-slider'),
     progressLabel: document.getElementById('progress-label'),
-    btnQuickSave: document.getElementById('btn-quick-save'),
     btnOpenBookmarks: document.getElementById('btn-open-bookmarks'),
+    btnAddBookmark: document.getElementById('btn-add-bookmark'),
     btnOpenToc: document.getElementById('btn-open-toc')
 };
 
@@ -31,7 +31,7 @@ let currentLocationCfi = null;
 let isLocationsReady = false;
 let totalPages = 1;
 
-let settings = JSON.parse(localStorage.getItem('reader_v10_configs')) || {
+let settings = JSON.parse(localStorage.getItem('reader_v11_configs')) || {
     font: "'Literata', serif", size: 100, lineHeight: 1.5, align: "justify", theme: "sepia", brightness: 100, paddingY: 60
 };
 
@@ -64,7 +64,7 @@ async function carregarBiblioteca() {
             e.stopPropagation();
             if (confirm(`Excluir "${bookMeta.title}" do aplicativo?`)) {
                 await localforage.removeItem(bookMeta.id); 
-                SafeStorage.remove('bookmarks_v10_' + bookMeta.id); 
+                SafeStorage.remove('bookmarks_v11_' + bookMeta.id); 
                 const nova = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', nova); 
                 carregarBiblioteca();
@@ -125,7 +125,7 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. MOTOR DE LEITURA (SEM AUTO-SAVE)
+// 2. MOTOR DE LEITURA (100% MANUAL, SEM AUTO-SAVE)
 // ==========================================
 async function abrirLivro(bookId) {
     currentBookId = bookId;
@@ -134,7 +134,7 @@ async function abrirLivro(bookId) {
     DOM.library.classList.add('hidden');
     DOM.reader.classList.remove('hidden');
     esconderMenus();
-    DOM.progressLabel.textContent = "Carregando...";
+    DOM.progressLabel.textContent = "Lendo...";
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
@@ -160,9 +160,18 @@ async function abrirLivro(bookId) {
         aplicarEstilosNoMotor();
         gerarSumario();
         
-        // SEMPRE ABRE NO INÍCIO AGORA. Você controla indo na sua lista de marcadores.
-        await rendition.display();
-        currentLocationCfi = rendition.location ? rendition.location.start.cfi : null;
+        // Tenta abrir direto no seu ÚLTIMO marcador salvo da lista (Para facilitar sua vida)
+        let bookmarks = JSON.parse(SafeStorage.get('bookmarks_v11_' + bookId)) || [];
+        let ultimoMarcador = bookmarks.length > 0 ? bookmarks[bookmarks.length - 1].cfi : null;
+
+        try {
+            if (ultimoMarcador) await rendition.display(ultimoMarcador);
+            else await rendition.display();
+            currentLocationCfi = rendition.location ? rendition.location.start.cfi : ultimoMarcador;
+        } catch(e) {
+            await rendition.display();
+            currentLocationCfi = rendition.location ? rendition.location.start.cfi : null;
+        }
 
         book.ready.then(() => book.locations.generate(1600)).then(() => {
             isLocationsReady = true;
@@ -170,7 +179,8 @@ async function abrirLivro(bookId) {
             atualizarProgresso(currentLocationCfi);
         });
 
-        // Atualiza apenas a barra de progresso visual, sem gravar NADA escondido.
+        // Acompanha a página apenas para atualizar a barra inferior e a variável temporal. 
+        // ELE NÃO SALVA NADA AUTOMATICAMENTE MAIS.
         rendition.on('relocated', (location) => {
             if (location && location.start && location.start.cfi) {
                 currentLocationCfi = location.start.cfi;
@@ -185,15 +195,14 @@ async function abrirLivro(bookId) {
 }
 
 // ==========================================
-// A LISTA DE MARCADORES (O SEU SALVAMENTO MANUAL)
+// A LISTA DE MARCADORES MANUAL (O SEU PLANO SEGURO)
 // ==========================================
-
 function carregarMarcadores() {
-    let bookmarks = JSON.parse(SafeStorage.get('bookmarks_v10_' + currentBookId)) || [];
+    let bookmarks = JSON.parse(SafeStorage.get('bookmarks_v11_' + currentBookId)) || [];
     DOM.bookmarksList.innerHTML = '';
     
     if (bookmarks.length === 0) {
-        DOM.bookmarksList.innerHTML = '<li style="justify-content:center; color:#999; font-weight:normal;">Você ainda não salvou nenhuma página.</li>';
+        DOM.bookmarksList.innerHTML = '<li style="justify-content:center; color:#999; font-weight:normal;">Nenhum marcador adicionado.</li>';
         return;
     }
 
@@ -216,7 +225,7 @@ function carregarMarcadores() {
         delBtn.onclick = (e) => {
             e.stopPropagation();
             bookmarks.splice(index, 1);
-            SafeStorage.set('bookmarks_v10_' + currentBookId, JSON.stringify(bookmarks));
+            SafeStorage.set('bookmarks_v11_' + currentBookId, JSON.stringify(bookmarks));
             carregarMarcadores();
         };
 
@@ -226,8 +235,8 @@ function carregarMarcadores() {
     });
 }
 
-// O BOTÃO DE SALVAMENTO RÁPIDO (Mantém só a última página salva)
-DOM.btnQuickSave.addEventListener('click', () => {
+// O Botão de "+ Adicionar" dentro da Lista de Marcadores
+DOM.btnAddBookmark.addEventListener('click', () => {
     const loc = rendition.currentLocation();
     const cfiExato = loc ? loc.start.cfi : currentLocationCfi;
     
@@ -236,28 +245,25 @@ DOM.btnQuickSave.addEventListener('click', () => {
         return;
     }
 
-    let labelNome = "Última Página Lida";
+    let bookmarks = JSON.parse(SafeStorage.get('bookmarks_v11_' + currentBookId)) || [];
+    
+    let labelNome = "Página Salva";
     if (isLocationsReady && book && book.locations.length > 0) {
         const pct = Math.round(book.locations.percentageFromCfi(cfiExato) * 100);
-        labelNome = `Página Salva (${pct}%)`;
+        labelNome = `Marcador (${pct}%)`;
+    } else {
+        const d = new Date();
+        labelNome = `Marcador - ${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`;
     }
 
-    // A Mágica: Ele cria uma array contendo APENAS a sua última página. Nunca acumula.
-    let bookmarks = [{ cfi: cfiExato, label: labelNome }];
-    
-    SafeStorage.set('bookmarks_v10_' + currentBookId, JSON.stringify(bookmarks));
+    // Adiciona na lista
+    bookmarks.push({ cfi: cfiExato, label: labelNome });
+    SafeStorage.set('bookmarks_v11_' + currentBookId, JSON.stringify(bookmarks));
     carregarMarcadores();
 
-    // Feedback Visual de Sucesso
-    DOM.btnQuickSave.textContent = "✔ Salvo!";
-    DOM.btnQuickSave.style.color = "#34a853";
-    
-    setTimeout(() => { 
-        DOM.btnQuickSave.textContent = "Salvar"; 
-        DOM.btnQuickSave.style.color = "#333";
-    }, 2000);
+    DOM.btnAddBookmark.textContent = "✔ Salvo!";
+    setTimeout(() => { DOM.btnAddBookmark.textContent = "+ Adicionar"; }, 2000);
 });
-
 
 function fecharLivro() {
     if (book) { book.destroy(); book = null; rendition = null; }
@@ -384,7 +390,7 @@ function aplicarEstilosNoMotor() {
 }
 
 function salvarConfigs() {
-    SafeStorage.set('reader_v10_configs', JSON.stringify(settings));
+    SafeStorage.set('reader_v11_configs', JSON.stringify(settings));
     aplicarEstilosNoMotor();
 }
 
@@ -420,7 +426,7 @@ document.getElementById('btn-back').addEventListener('click', fecharLivro);
 document.getElementById('btn-settings').addEventListener('click', () => { esconderMenus(); DOM.settingsModal.classList.remove('hidden'); });
 DOM.btnOpenToc.addEventListener('click', () => { esconderMenus(); DOM.tocModal.classList.remove('hidden'); });
 
-// Botão Abre a Lista de Marcadores
+// Botão Abre Modal de Marcadores
 DOM.btnOpenBookmarks.addEventListener('click', () => {
     esconderMenus();
     DOM.bookmarksModal.classList.remove('hidden');
