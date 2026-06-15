@@ -1,106 +1,98 @@
-const libraryView = document.getElementById('library-view');
-const readerView = document.getElementById('reader-view');
-const bookshelf = document.getElementById('bookshelf');
-const fileInput = document.getElementById('file-input');
-const settingsModal = document.getElementById('settings-modal');
-const tocModal = document.getElementById('toc-modal');
+const DOM = {
+    library: document.getElementById('library-view'),
+    reader: document.getElementById('reader-view'),
+    bookshelf: document.getElementById('bookshelf'),
+    fileInput: document.getElementById('file-input'),
+    uploadLabel: document.getElementById('upload-label'),
+    topBar: document.getElementById('top-bar'),
+    bottomBar: document.getElementById('bottom-bar'),
+    settingsModal: document.getElementById('settings-modal'),
+    tocModal: document.getElementById('toc-modal'),
+    tocList: document.getElementById('toc-list'),
+    progressSlider: document.getElementById('progress-slider'),
+    progressLabel: document.getElementById('progress-label'),
+    btnBookmark: document.getElementById('btn-bookmark')
+};
 
-let currentBook = null;
+let book = null;
 let rendition = null;
 let currentBookId = null;
 
-let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
-    fontSize: 100,
-    fontFamily: "'Literata', serif", 
-    theme: 'sepia', 
+// Configurações Globais (Salvas no LocalStorage)
+let settings = JSON.parse(localStorage.getItem('reader_pro_configs')) || {
+    font: "'Literata', serif",
+    size: 100,
+    lineHeight: 1.5,
+    align: "justify",
+    theme: "sepia",
     brightness: 100
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    loadLibrary();
-    initUIEvents();
+    carregarBiblioteca();
+    carregarUIConfigs();
 });
 
-function fecharMenus() {
-    readerView.classList.add('ui-hidden');
-    settingsModal.classList.add('hidden');
-    tocModal.classList.add('hidden');
-}
+// ==========================================
+// 1. BIBLIOTECA
+// ==========================================
 
-// Salva posição da leitura
-async function salvarPosicao(cfi) {
-    if (!currentBookId || !cfi) return;
-    try {
-        const library = await localforage.getItem('library_metadata') || [];
-        const bookIndex = library.findIndex(b => b.id === currentBookId);
-        if (bookIndex !== -1) {
-            library[bookIndex].cfi = cfi;
-            await localforage.setItem('library_metadata', library);
-        }
-    } catch (e) {
-        console.error("Erro ao salvar progresso:", e);
-    }
-}
-
-// Carrega estante de livros
-async function loadLibrary() {
-    bookshelf.innerHTML = '';
+async function carregarBiblioteca() {
+    DOM.bookshelf.innerHTML = '';
     const library = await localforage.getItem('library_metadata') || [];
     
     if (library.length === 0) {
-        bookshelf.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #666; margin-top: 20px;">Nenhum livro salvo.</p>';
+        DOM.bookshelf.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #888;">Nenhum livro importado.</p>';
         return;
     }
 
     library.forEach(bookMeta => {
         const div = document.createElement('div');
         div.className = 'book-item';
-        div.onclick = () => openBook(bookMeta.id);
+        div.onclick = () => abrirLivro(bookMeta.id);
 
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
-        deleteBtn.innerHTML = '✕'; 
+        deleteBtn.innerHTML = '✕';
         deleteBtn.onclick = async (e) => {
             e.stopPropagation();
-            if (confirm(`Excluir permanentemente "${bookMeta.title}"?`)) {
-                await localforage.removeItem(bookMeta.id);
-                const novaBiblioteca = library.filter(b => b.id !== bookMeta.id);
-                await localforage.setItem('library_metadata', novaBiblioteca);
-                loadLibrary();
+            if (confirm(`Excluir "${bookMeta.title}" do aplicativo?`)) {
+                await localforage.removeItem(bookMeta.id); 
+                const nova = library.filter(b => b.id !== bookMeta.id);
+                await localforage.setItem('library_metadata', nova); 
+                carregarBiblioteca();
             }
         };
 
         const img = document.createElement('img');
         img.className = 'book-cover';
-        img.src = bookMeta.cover || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="%23eee"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23999">Sem Capa</text></svg>';
+        img.src = bookMeta.cover || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="%23eee"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23999" font-family="sans-serif" font-size="12px">Sem Capa</text></svg>';
         
         const title = document.createElement('div');
         title.className = 'book-title';
         title.textContent = bookMeta.title;
 
-        div.appendChild(deleteBtn);
-        div.appendChild(img);
-        div.appendChild(title);
-        bookshelf.appendChild(div);
+        div.appendChild(deleteBtn); div.appendChild(img); div.appendChild(title);
+        DOM.bookshelf.appendChild(div);
     });
 }
 
-// Upload de novo livro
-fileInput.addEventListener('change', async (e) => {
+DOM.fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const btnText = document.querySelector('.upload-btn').childNodes[0];
-    btnText.textContent = "Processando...";
+    
+    DOM.uploadLabel.classList.add('loading');
+    DOM.uploadLabel.childNodes[0].textContent = " Processando...";
     
     try {
         const arrayBuffer = await file.arrayBuffer();
-        const bookData = ePub(arrayBuffer);
-        await bookData.ready;
-        const metadata = await bookData.loaded.metadata;
+        const tempBook = ePub(arrayBuffer);
+        await tempBook.ready;
+        const metadata = await tempBook.loaded.metadata;
         
         let coverBase64 = null;
         try {
-            const coverUrl = await bookData.coverUrl();
+            const coverUrl = await tempBook.coverUrl();
             if (coverUrl) {
                 const response = await fetch(coverUrl);
                 const blob = await response.blob();
@@ -114,29 +106,39 @@ fileInput.addEventListener('change', async (e) => {
 
         const bookId = 'book_' + Date.now();
         await localforage.setItem(bookId, arrayBuffer);
+        
         const library = await localforage.getItem('library_metadata') || [];
-        library.push({ id: bookId, title: metadata.title, cover: coverBase64, cfi: null });
+        library.push({ id: bookId, title: metadata.title || "Livro Desconhecido", cover: coverBase64, cfi: null });
         await localforage.setItem('library_metadata', library);
-        await loadLibrary();
-    } catch (error) { alert("Erro ao processar o arquivo."); } 
-    finally {
-        btnText.textContent = "Adicionar EPUB";
-        fileInput.value = '';
+        
+        tempBook.destroy();
+        carregarBiblioteca();
+        
+    } catch (error) {
+        alert("Erro. O arquivo EPUB pode estar corrompido.");
+    } finally {
+        DOM.uploadLabel.classList.remove('loading');
+        DOM.uploadLabel.childNodes[0].textContent = "+ Adicionar Livro";
+        DOM.fileInput.value = '';
     }
 });
 
-// Abrir Livro e Renderizar
-async function openBook(bookId) {
+// ==========================================
+// 2. MOTOR DE LEITURA (EPUB.JS)
+// ==========================================
+
+async function abrirLivro(bookId) {
     currentBookId = bookId;
-    libraryView.style.display = 'none';
-    readerView.style.display = 'block';
-    fecharMenus(); 
+    DOM.library.classList.add('hidden');
+    DOM.reader.classList.remove('hidden');
+    esconderMenus();
+    DOM.progressLabel.textContent = "Calculando...";
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
-        currentBook = ePub(arrayBuffer);
+        book = ePub(arrayBuffer);
         
-        rendition = currentBook.renderTo('viewer', {
+        rendition = book.renderTo('viewer', {
             width: '100%',
             height: '100%',
             spread: 'none',
@@ -144,278 +146,228 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
-        // Configuração nativa de temas no epub.js
-        rendition.themes.register("light", { "body": { "background": "#ffffff !important" }});
-        rendition.themes.register("sepia", { "body": { "background": "#fefbec !important" }});
-        rendition.themes.register("dark", { "body": { "background": "#121212 !important" }});
-        
-        // Sempre que uma página/capítulo for carregado, aplica nosso motor de estilos
+        // Temas de base para o Iframe
+        rendition.themes.register("light", { "body": { "background": "#ffffff" }});
+        rendition.themes.register("sepia", { "body": { "background": "#FDF7EC" }});
+        rendition.themes.register("dark",  { "body": { "background": "#121212" }});
+
+        // Garante a injeção da fonte Literata do Google
         rendition.hooks.content.register((contents) => {
-            aplicarEstilosNoConteudo(contents);
+            const doc = contents.document;
+            if (!doc.getElementById('font-literata')) {
+                const link = doc.createElement('link'); link.id = 'font-literata'; link.rel = 'stylesheet';
+                link.href = 'https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap';
+                doc.head.appendChild(link);
+            }
         });
 
-        aplicarConfiguracoesDinamicas();
-
+        aplicarEstilosNoMotor();
+        
+        // Pega a página salva no banco e exibe
         const library = await localforage.getItem('library_metadata');
         const bookMeta = library.find(b => b.id === bookId);
         
-        if (bookMeta && bookMeta.cfi) {
-            try { await rendition.display(bookMeta.cfi); } catch(e) { await rendition.display(); }
-        } else {
-            await rendition.display();
-        }
-
-        // Gera Sumário
-        currentBook.loaded.navigation.then(nav => {
-            const tocList = document.getElementById('toc-list');
-            tocList.innerHTML = '';
-            
-            const generateToc = (items, level = 0) => {
-                items.forEach(chapter => {
-                    const li = document.createElement('li');
-                    li.className = 'toc-item';
-                    li.style.paddingLeft = `${level * 20}px`;
-                    li.textContent = chapter.label.trim() || 'Capítulo';
-                    
-                    li.onclick = () => {
-                        rendition.display(chapter.href);
-                        fecharMenus(); 
-                    };
-                    tocList.appendChild(li);
-                    if (chapter.subitems && chapter.subitems.length > 0) generateToc(chapter.subitems, level + 1);
-                });
-            };
-            if (nav.toc) generateToc(nav.toc);
+        rendition.display(bookMeta.cfi || undefined).then(() => {
+            // Gera as localizações do livro para a barra de progresso (Slider) funcionar
+            book.locations.generate(1600).then(() => {
+                atualizarProgresso(rendition.location.start.cfi);
+            });
+            gerarSumario();
         });
 
-        // Paginação e Progresso
-        currentBook.ready.then(() => currentBook.locations.generate(1600)).then(() => {
-            atualizarProgressoVisual(rendition.location.start.cfi);
+        rendition.on('relocated', (location) => {
+            DOM.btnBookmark.classList.remove('saved');
+            DOM.btnBookmark.textContent = '📍 Salvar Posição';
+            if (location && location.start) atualizarProgresso(location.start.cfi);
         });
 
-        rendition.on('relocated', async (location) => {
-            document.getElementById('btn-bookmark').classList.remove('saved'); 
-            if (location && location.start && location.start.cfi) {
-                await salvarPosicao(location.start.cfi); 
-                atualizarProgressoVisual(location.start.cfi);
-            }
-        });
-
-    } catch (e) { fecharLivro(); }
-}
-
-function atualizarProgressoVisual(cfi) {
-    if(currentBook && currentBook.locations.length > 0 && cfi) {
-        const percentage = currentBook.locations.percentageFromCfi(cfi);
-        const calc = Math.round(percentage * 100);
-        document.getElementById('progress-slider').value = calc;
-        document.getElementById('page-info').textContent = `${calc}%`;
+    } catch (e) {
+        alert("Falha crítica ao abrir o livro.");
+        fecharLivro();
     }
 }
+
+// ==========================================
+// 3. NAVEGAÇÃO, SUMÁRIO E MARCADOR
+// ==========================================
+
+function gerarSumario() {
+    book.loaded.navigation.then(nav => {
+        DOM.tocList.innerHTML = '';
+        nav.toc.forEach(chapter => {
+            const li = document.createElement('li');
+            li.textContent = chapter.label.trim();
+            li.onclick = () => {
+                rendition.display(chapter.href);
+                DOM.tocModal.classList.add('hidden');
+                esconderMenus();
+            };
+            DOM.tocList.appendChild(li);
+        });
+    });
+}
+
+function atualizarProgresso(cfi) {
+    if (book && book.locations.length > 0 && cfi) {
+        const percent = book.locations.percentageFromCfi(cfi);
+        const valor = Math.round(percent * 100);
+        DOM.progressSlider.value = valor;
+        DOM.progressLabel.textContent = `${valor}%`;
+    }
+}
+
+// Quando o usuário arrastar o slider na barra inferior
+DOM.progressSlider.addEventListener('change', (e) => {
+    if (book && book.locations.length > 0) {
+        const percent = e.target.value / 100;
+        const targetCfi = book.locations.cfiFromPercentage(percent);
+        rendition.display(targetCfi);
+    }
+});
+
+DOM.btnBookmark.addEventListener('click', async () => {
+    if (rendition && rendition.location && currentBookId) {
+        const currentCfi = rendition.location.start.cfi;
+        const library = await localforage.getItem('library_metadata');
+        const bookIndex = library.findIndex(b => b.id === currentBookId);
+        
+        if (bookIndex !== -1) {
+            library[bookIndex].cfi = currentCfi;
+            await localforage.setItem('library_metadata', library);
+            DOM.btnBookmark.classList.add('saved');
+            DOM.btnBookmark.textContent = '✔ Salvo!';
+        }
+    }
+});
 
 function fecharLivro() {
-    currentBookId = null;
-    if (currentBook) { currentBook.destroy(); currentBook = null; rendition = null; }
+    if (book) { book.destroy(); book = null; rendition = null; }
     document.getElementById('viewer').innerHTML = '';
-    readerView.style.display = 'none';
-    libraryView.style.display = 'block';
-    
-    document.documentElement.style.backgroundColor = '#f5f5f7';
-    document.body.style.backgroundColor = '#f5f5f7';
-    const meta = document.getElementById('theme-color-meta');
-    if (meta) meta.setAttribute('content', '#f5f5f7');
+    currentBookId = null;
+    DOM.reader.classList.add('hidden');
+    DOM.library.classList.remove('hidden');
+    document.body.style.background = '#f5f5f7';
+    document.getElementById('theme-color-meta').setAttribute('content', '#f5f5f7');
 }
 
-// Eventos dos Botões
-function initUIEvents() {
-    // Áreas de toque
-    document.getElementById('zone-left').addEventListener('click', () => { if (rendition) rendition.prev(); fecharMenus(); });
-    document.getElementById('zone-right').addEventListener('click', () => { if (rendition) rendition.next(); fecharMenus(); });
-    document.getElementById('zone-center').addEventListener('click', () => {
-        const isHidden = readerView.classList.contains('ui-hidden');
-        if (isHidden) readerView.classList.remove('ui-hidden');
-        else fecharMenus();
-    });
+// ==========================================
+// 4. MOTOR DE ESTILIZAÇÃO E UI
+// ==========================================
 
-    document.getElementById('btn-back').addEventListener('click', fecharLivro);
-    
-    document.getElementById('btn-bookmark').addEventListener('click', async () => {
-        if (rendition && rendition.location && rendition.location.start) {
-            await salvarPosicao(rendition.location.start.cfi);
-            document.getElementById('btn-bookmark').classList.add('saved');
-        }
-    });
-
-    document.getElementById('btn-aa').addEventListener('click', () => {
-        tocModal.classList.add('hidden');
-        settingsModal.classList.toggle('hidden');
-    });
-
-    document.getElementById('btn-toc').addEventListener('click', () => {
-        settingsModal.classList.add('hidden');
-        tocModal.classList.toggle('hidden');
-    });
-
-    // Abas
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            e.target.classList.add('active');
-            document.getElementById(`tab-${e.target.dataset.tab}`).classList.add('active');
-        });
-    });
-
-    // Fontes
-    document.querySelectorAll('.font-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            readerSettings.fontFamily = e.currentTarget.dataset.font;
-            aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig();
-        });
-    });
-
-    // Tamanho
-    document.getElementById('btn-font-plus').addEventListener('click', () => { readerSettings.fontSize += 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
-    document.getElementById('btn-font-minus').addEventListener('click', () => { if(readerSettings.fontSize > 50) readerSettings.fontSize -= 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
-
-    // Temas
-    document.querySelectorAll('.theme-color-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            readerSettings.theme = e.target.dataset.theme;
-            aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig();
-        });
-    });
-
-    document.getElementById('brightness-slider').addEventListener('input', (e) => { readerSettings.brightness = e.target.value; aplicarBrilho(); salvarConfig(); });
-
-    atualizarUI(); 
-}
-
-function salvarConfig() { localStorage.setItem('reader_settings', JSON.stringify(readerSettings)); }
-
-// Aplica as cores principais e tamanhos
-function aplicarConfiguracoesDinamicas() {
+function aplicarEstilosNoMotor() {
     if (!rendition) return;
-    rendition.themes.select(readerSettings.theme);
-    
-    // Matriz exata de Cores
-    const bgColors = { 'light': '#ffffff', 'sepia': '#fefbec', 'dark': '#121212' };
-    const textColors = { 'light': '#1d1d1f', 'sepia': '#3B2A19', 'dark': '#e0e0e0' }; // #3B2A19 é o marrom escuro da sua print
-    const firstPhraseColors = { 'light': '#000000', 'sepia': '#110c07', 'dark': '#ffffff' }; // Marrom quase preto para a primeira frase
-    
-    const currentBg = bgColors[readerSettings.theme];
-    const currentText = textColors[readerSettings.theme];
-    const currentHighlight = firstPhraseColors[readerSettings.theme];
-    
-    readerView.style.background = currentBg;
-    settingsModal.style.background = (readerSettings.theme === 'dark') ? '#1f1f1f' : '#ffffff';
-    settingsModal.style.color = (readerSettings.theme === 'dark') ? '#ffffff' : '#333';
-    
-    tocModal.style.background = currentBg;
-    tocModal.style.color = currentText;
 
-    document.documentElement.style.backgroundColor = currentBg;
-    document.body.style.backgroundColor = currentBg;
+    rendition.themes.select(settings.theme);
 
-    const themeColorMeta = document.getElementById('theme-color-meta');
-    if (themeColorMeta) themeColorMeta.setAttribute('content', currentBg);
+    // Ajuste fino das Cores Baseadas no Play Livros
+    const coresBg = { 'light': '#ffffff', 'sepia': '#FDF7EC', 'dark': '#121212' };
+    const coresTexto = { 'light': '#000000', 'sepia': '#2B1E12', 'dark': '#e0e0e0' }; // #2B1E12 = Marrom escuro autêntico
 
-    rendition.themes.fontSize(readerSettings.fontSize + "%");
+    const bgCor = coresBg[settings.theme];
+    const textCor = coresTexto[settings.theme];
+
+    DOM.reader.style.background = bgCor;
+    document.body.style.background = bgCor;
+    document.getElementById('theme-color-meta').setAttribute('content', bgCor);
     
-    // Injeta Variáveis CSS direto no iframe para o motor caçador usar
+    // Altera a cor do modal dependendo do tema escuro
+    DOM.settingsModal.style.background = settings.theme === 'dark' ? '#1f1f1f' : '#ffffff';
+    DOM.settingsModal.style.color = settings.theme === 'dark' ? '#ffffff' : '#333';
+    DOM.tocModal.style.background = bgCor;
+    DOM.tocModal.style.color = textCor;
+
+    rendition.themes.fontSize(`${settings.size}%`);
+
+    // Injeção Pesada e Garantida de CSS
     rendition.themes.default({
         "body": {
-            "background-color": "transparent !important",
-            "color": `${currentText} !important`,
-            "font-family": readerSettings.fontFamily !== 'Original' ? `${readerSettings.fontFamily} !important` : "inherit",
-            "--highlight-color": currentHighlight
+            "font-family": settings.font === 'Original' ? "inherit !important" : `${settings.font} !important`,
+            "text-align": `${settings.align} !important`,
+            "line-height": `${settings.lineHeight} !important`,
+            "color": `${textCor} !important`,
+            "padding": "0 20px !important"
         },
         "p": {
-            "text-align": "justify !important",
-            "line-height": "1.6 !important"
+            "text-align": `${settings.align} !important`,
+            "line-height": `${settings.lineHeight} !important`,
+            "margin-bottom": "1em !important"
+        },
+        "h1, h2, h3": {
+            "color": `${textCor} !important`,
+            "font-family": settings.font === 'Original' ? "inherit !important" : `${settings.font} !important`
         }
     });
-    
-    aplicarBrilho();
-}
 
-// O NOVO MOTOR INTELIGENTE DA PRIMEIRA FRASE
-function aplicarEstilosNoConteudo(content) {
-    const doc = content.document;
-
-    // 1. Injeta a Literata direto no Iframe do livro
-    if (!doc.getElementById('literata-font-import')) {
-        const fontLink = doc.createElement('link');
-        fontLink.id = 'literata-font-import';
-        fontLink.rel = 'stylesheet';
-        fontLink.href = 'https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap';
-        doc.head.appendChild(fontLink);
-    }
-
-    // 2. Estilo específico da primeira frase
-    let style = doc.getElementById('epub-dynamic-styles');
-    if (!style) {
-        style = doc.createElement('style');
-        style.id = 'epub-dynamic-styles';
-        style.innerHTML = `
-            .play-books-first-phrase {
-                font-weight: 700 !important; 
-                color: var(--highlight-color, #000) !important;
-                /* Removido o small-caps. Agora é apenas fonte mais forte (bold) e cor mais escura */
-            }
-        `;
-        doc.head.appendChild(style);
-    }
-
-    // 3. O Caçador da Primeira Frase
-    const paragraphs = doc.querySelectorAll('p');
-    for (let i = 0; i < paragraphs.length; i++) {
-        let p = paragraphs[i];
-        
-        // Pula parágrafos vazios ou que sejam só uma imagem perdida
-        if (p.textContent.trim().length > 15) {
-            
-            // Só executa se o parágrafo ainda não foi modificado
-            if (!p.dataset.modified) {
-                let html = p.innerHTML;
-                
-                // Regex: Procura a primeira frase que acabe com . ! ou ? seguido de espaço ou quebra.
-                let match = html.match(/^(.*?[.!?])(\s|<|$)/);
-                
-                if (match && match[1]) {
-                    let primeiraFrase = match[1];
-                    let restoDoTexto = html.substring(primeiraFrase.length);
-                    
-                    // Envolve APENAS a primeira frase no span com a classe especial
-                    p.innerHTML = `<span class="play-books-first-phrase">${primeiraFrase}</span>${restoDoTexto}`;
-                    p.dataset.modified = "true";
-                } else {
-                    // Fallback de segurança se o parágrafo for bizarro sem pontuação
-                    p.innerHTML = `<span class="play-books-first-phrase">${html}</span>`;
-                    p.dataset.modified = "true";
-                }
-            }
-            // Importante: Quebra o loop para aplicar ISSO APENAS NO PRIMEIRO PARÁGRAFO DO CAPÍTULO!
-            break; 
-        }
-    }
-}
-
-function aplicarBrilho() {
+    // Aplica Brilho (Filtro Escuro por cima)
     const overlay = document.getElementById('brightness-overlay');
-    const darkness = 1 - (readerSettings.brightness / 100);
-    overlay.style.opacity = darkness;
+    overlay.style.opacity = 1 - (settings.brightness / 100);
 }
 
-function atualizarUI() {
-    document.getElementById('font-size-display').textContent = readerSettings.fontSize + '%';
-    document.getElementById('brightness-slider').value = readerSettings.brightness;
+function salvarConfigs() {
+    localStorage.setItem('reader_pro_configs', JSON.stringify(settings));
+    aplicarEstilosNoMotor();
+}
+
+function carregarUIConfigs() {
+    document.getElementById('label-size').textContent = `${settings.size}%`;
+    document.getElementById('label-line').textContent = settings.lineHeight;
+    document.getElementById('select-align').value = settings.align;
+    document.getElementById('brightness-slider').value = settings.brightness;
     
+    // Atualiza botões de Fonte
     document.querySelectorAll('.font-btn').forEach(btn => {
-        btn.classList.toggle('selected', btn.dataset.font === readerSettings.fontFamily);
+        btn.classList.toggle('selected', btn.dataset.font === settings.font);
     });
-    
-    document.querySelectorAll('.theme-color-btn').forEach(btn => {
-        btn.classList.toggle('selected', btn.dataset.theme === readerSettings.theme);
+
+    // Atualiza botões de Tema
+    document.querySelectorAll('.theme-btn').forEach(btn => {
+        btn.classList.remove('active');
+        btn.textContent = '';
+        if(btn.dataset.theme === settings.theme) {
+            btn.classList.add('active');
+            btn.textContent = '✓'; // Adiciona o checkmark igual ao print
+        }
     });
 }
+
+// Eventos de Toque e Navegação
+document.getElementById('zone-left').addEventListener('click', () => { if (rendition) rendition.prev(); esconderMenus(); });
+document.getElementById('zone-right').addEventListener('click', () => { if (rendition) rendition.next(); esconderMenus(); });
+document.getElementById('zone-center').addEventListener('click', () => {
+    const isHidden = DOM.topBar.classList.contains('hidden');
+    if (isHidden) { DOM.topBar.classList.remove('hidden'); DOM.bottomBar.classList.remove('hidden'); } 
+    else { esconderMenus(); }
+});
+
+function esconderMenus() {
+    DOM.topBar.classList.add('hidden');
+    DOM.bottomBar.classList.add('hidden');
+    DOM.settingsModal.classList.add('hidden');
+}
+
+// Botões das Barras
+document.getElementById('btn-settings').addEventListener('click', () => DOM.settingsModal.classList.toggle('hidden'));
+document.getElementById('btn-back').addEventListener('click', fecharLivro);
+document.getElementById('btn-open-toc').addEventListener('click', () => { esconderMenus(); DOM.tocModal.classList.remove('hidden'); });
+document.getElementById('btn-close-toc').addEventListener('click', () => DOM.tocModal.classList.add('hidden'));
+
+// Abas de Configuração
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        e.target.classList.add('active');
+        document.getElementById(`tab-${e.target.dataset.tab}`).classList.add('active');
+    });
+});
+
+// Ações dos Controles
+document.querySelectorAll('.font-btn').forEach(btn => { btn.addEventListener('click', (e) => { settings.font = e.currentTarget.dataset.font; carregarUIConfigs(); salvarConfigs(); }); });
+document.getElementById('btn-size-minus').addEventListener('click', () => { if (settings.size > 70) settings.size -= 10; carregarUIConfigs(); salvarConfigs(); });
+document.getElementById('btn-size-plus').addEventListener('click', () => { if (settings.size < 200) settings.size += 10; carregarUIConfigs(); salvarConfigs(); });
+document.getElementById('btn-line-minus').addEventListener('click', () => { if (settings.lineHeight > 1.2) settings.lineHeight = (settings.lineHeight - 0.1).toFixed(1); carregarUIConfigs(); salvarConfigs(); });
+document.getElementById('btn-line-plus').addEventListener('click', () => { if (settings.lineHeight < 2.0) settings.lineHeight = (parseFloat(settings.lineHeight) + 0.1).toFixed(1); carregarUIConfigs(); salvarConfigs(); });
+document.getElementById('select-align').addEventListener('change', (e) => { settings.align = e.target.value; salvarConfigs(); });
+document.getElementById('brightness-slider').addEventListener('input', (e) => { settings.brightness = e.target.value; salvarConfigs(); });
+
+document.querySelectorAll('.theme-btn').forEach(btn => { btn.addEventListener('click', (e) => { settings.theme = e.target.dataset.theme; carregarUIConfigs(); salvarConfigs(); }); });
