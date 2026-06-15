@@ -8,6 +8,7 @@ const tocModal = document.getElementById('toc-modal');
 let currentBook = null;
 let rendition = null;
 let currentBookId = null;
+let saveTimeout = null; // Controle de delay para salvar posição correta
 
 let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
     fontSize: 100,
@@ -27,12 +28,12 @@ function fecharMenus() {
     tocModal.classList.add('hidden');
 }
 
-// --- SALVAMENTO ROBUSTO (Manual e Automático Otimizado para iOS) ---
+// --- SALVAMENTO ROBUSTO BLINDADO PARA iOS ---
+// Usamos localforage (IndexedDB) no lugar do localStorage para garantir persistência real em PWAs
 async function salvarPosicao(cfi) {
     if (!currentBookId || !cfi) return;
     try {
-        // Salva apenas a string da posição direto no localStorage. Leve e instantâneo.
-        localStorage.setItem(`pos_${currentBookId}`, cfi);
+        await localforage.setItem(`pos_${currentBookId}`, cfi);
     } catch (e) {
         console.error("Erro ao salvar progresso:", e);
     }
@@ -60,7 +61,7 @@ async function loadLibrary() {
             e.stopPropagation();
             if (confirm(`Excluir permanentemente o livro "${bookMeta.title}" do leitor?`)) {
                 await localforage.removeItem(bookMeta.id);
-                localStorage.removeItem(`pos_${bookMeta.id}`); // Limpa o progresso também
+                await localforage.removeItem(`pos_${bookMeta.id}`); // Limpa progresso salvo
                 const novaBiblioteca = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', novaBiblioteca);
                 loadLibrary();
@@ -136,7 +137,6 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
-        // Registrar os temas vazios e aplicar cores dinâmicas via JS Injection
         rendition.themes.register("light", { "body": { "background": "#ffffff !important" }});
         rendition.themes.register("sepia", { "body": { "background": "#fefbec !important" }});
         rendition.themes.register("dark", { "body": { "background": "#121212 !important" }});
@@ -144,14 +144,14 @@ async function openBook(bookId) {
         rendition.themes.select(readerSettings.theme);
         rendition.themes.fontSize(readerSettings.fontSize + "%");
         
-        // Dispara a injeção de estilo avançado sempre que um novo capítulo é desenhado
         rendition.hooks.content.register((contents) => {
             aplicarEstilosNoConteudo(contents);
         });
 
         aplicarConfiguracoesDinamicas();
 
-        const savedCfi = localStorage.getItem(`pos_${bookId}`);
+        // Recupera o salvamento usando o motor blindado
+        const savedCfi = await localforage.getItem(`pos_${bookId}`);
         
         if (savedCfi) {
             try { 
@@ -198,17 +198,21 @@ async function openBook(bookId) {
             }
         });
 
-        // Vínculo reativo da virada de página (Desmarca botão manual e executa Auto-Save)
-        rendition.on('relocated', async (location) => {
-            document.getElementById('btn-bookmark').classList.remove('saved'); // Apaga o marcador ao mudar de página
-            if (location && location.start && location.start.cfi) {
-                await salvarPosicao(location.start.cfi); // Executa o salvamento automático invisível
-            }
-            if(currentBook.locations.length > 0) {
-                const percentage = currentBook.locations.percentageFromCfi(location.start.cfi);
-                document.getElementById('progress-slider').value = Math.round(percentage * 100);
-                document.getElementById('page-info').textContent = `${Math.round(percentage * 100)}%`;
-            }
+        // Evento 'relocated' com DEBOUNCE (Evita salvar a página errada enquanto folheia)
+        rendition.on('relocated', (location) => {
+            document.getElementById('btn-bookmark').classList.remove('saved'); 
+            
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(async () => {
+                if (location && location.start && location.start.cfi) {
+                    await salvarPosicao(location.start.cfi); 
+                }
+                if(currentBook.locations.length > 0) {
+                    const percentage = currentBook.locations.percentageFromCfi(location.start.cfi);
+                    document.getElementById('progress-slider').value = Math.round(percentage * 100);
+                    document.getElementById('page-info').textContent = `${Math.round(percentage * 100)}%`;
+                }
+            }, 600); // Aguarda 600ms antes de confirmar que a página foi fixada e salvar
         });
 
     } catch (e) { fecharLivro(); }
@@ -240,11 +244,10 @@ function initUIEvents() {
 
     document.getElementById('btn-back').addEventListener('click', fecharLivro);
     
-    // Botão Marcador (Manual Save)
     document.getElementById('btn-bookmark').addEventListener('click', async () => {
         if (rendition && rendition.location && rendition.location.start) {
             await salvarPosicao(rendition.location.start.cfi);
-            document.getElementById('btn-bookmark').classList.add('saved'); // Fica Azul
+            document.getElementById('btn-bookmark').classList.add('saved'); 
         }
     });
 
@@ -298,7 +301,7 @@ function aplicarConfiguracoesDinamicas() {
     rendition.themes.select(readerSettings.theme);
     
     const bgColors = { 'light': '#ffffff', 'sepia': '#fefbec', 'dark': '#121212' };
-    const textColors = { 'light': '#000000', 'sepia': '#3a2d24', 'dark': '#e0e0e0' }; // Cor do texto mais escura
+    const textColors = { 'light': '#000000', 'sepia': '#3a2d24', 'dark': '#cccccc' }; 
     const currentBgColor = bgColors[readerSettings.theme];
     
     readerView.style.background = currentBgColor;
@@ -317,7 +320,6 @@ function aplicarConfiguracoesDinamicas() {
 
     rendition.themes.fontSize(readerSettings.fontSize + "%");
     
-    // Re-aplica estilos em todas as iframes ativas na mudança de configuração
     if (rendition.getContents) {
         rendition.getContents().forEach(content => aplicarEstilosNoConteudo(content));
     }
@@ -325,30 +327,10 @@ function aplicarConfiguracoesDinamicas() {
     aplicarBrilho();
 }
 
-// --- O NOVO MOTOR CIENTÍFICO (SEM ACHISMOS) ---
+// --- ESTRATÉGIA NUCLEAR DE ESTILO ---
 function aplicarEstilosNoConteudo(content) {
     const doc = content.document;
 
-    // 1. Injeção de Fontes
-    if (!doc.getElementById('literata-font-import')) {
-        const fontLink = doc.createElement('link');
-        fontLink.id = 'literata-font-import';
-        fontLink.rel = 'stylesheet';
-        fontLink.href = 'https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap';
-        doc.head.appendChild(fontLink);
-    }
-
-    // 2. Caçador de Primeiro Parágrafo com JS (Resolve definitivamente o problema do Small Caps)
-    const paragraphs = doc.querySelectorAll('p');
-    for (let i = 0; i < paragraphs.length; i++) {
-        // Encontra o primeiro parágrafo que seja realmente texto (não vazio ou apenas espaço/imagem)
-        if (paragraphs[i].textContent.trim().length > 5) {
-            paragraphs[i].classList.add('epub-primeiro-paragrafo');
-            break; // Aplica a classe e sai do loop
-        }
-    }
-
-    // 3. Matriz de Cores e Força Bruta
     let style = doc.getElementById('epub-dynamic-styles');
     if (!style) {
         style = doc.createElement('style');
@@ -356,65 +338,50 @@ function aplicarEstilosNoConteudo(content) {
         doc.head.appendChild(style);
     }
 
-    // Cores gerais mais escuras
-    const textColors = { 'light': '#000000', 'sepia': '#3a2d24', 'dark': '#e0e0e0' };
-    
-    // Destaques (negrito, títulos e primeira frase) praticamente pretos
+    const textColors = { 'light': '#000000', 'sepia': '#3a2d24', 'dark': '#cccccc' };
     const highlightColors = { 'light': '#000000', 'sepia': '#110a05', 'dark': '#ffffff' }; 
     
     const currentText = textColors[readerSettings.theme];
     const currentHighlight = highlightColors[readerSettings.theme];
     
     const fontToApply = readerSettings.fontFamily !== 'Original' ? `font-family: ${readerSettings.fontFamily} !important;` : '';
-    const isLiterata = readerSettings.fontFamily.includes('Literata');
-    const literataFixNorm = isLiterata ? 'font-variation-settings: "opsz" 14, "wght" 400 !important;' : '';
-    const literataFixBold = isLiterata ? 'font-variation-settings: "opsz" 14, "wght" 700 !important;' : '';
 
+    // Importar via @import previne o bloqueio do Safari
     style.innerHTML = `
+        @import url('https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap');
+
         body {
             padding: calc(40px + env(safe-area-inset-top)) 20px calc(80px + env(safe-area-inset-bottom)) 20px !important; 
             margin: 0 !important; 
             background-color: transparent !important;
-            -webkit-font-smoothing: antialiased !important;
             text-rendering: optimizeLegibility !important;
+            -webkit-font-smoothing: antialiased !important;
         }
         
-        /* Coringa (*): Esmaga QUALQUER cor ditada pelo livro e impõe a nossa cor Padrão */
-        body * {
+        /* Força a cor e a fonte em todos os elementos de texto base */
+        p, div, span, a, li, td {
             color: ${currentText} !important;
+            ${fontToApply}
+            line-height: 1.6 !important;
+            font-weight: 400 !important;
+        }
+
+        /* Protege cabeçalhos e negritos com a cor de destaque (mais escura) */
+        h1, h2, h3, h4, h5, h6, strong, b, em, i {
+            color: ${currentHighlight} !important;
+            font-weight: 700 !important;
             ${fontToApply}
         }
 
-        /* Garante que o texto normal seja fino (Peso 400) */
-        p, div, li, body {
-            font-weight: 400 !important;
-            ${literataFixNorm}
-        }
-
-        /* Recupera e Protege os Títulos/Negritos com a Cor Forte/Destaque */
-        h1, h2, h3, h4, h5, h6, b, strong {
-            font-weight: 700 !important;
-            color: ${currentHighlight} !important;
-            ${literataFixBold}
-        }
-
-        /* ESTILO DA PRIMEIRA FRASE GARANTIDO PELO JS CAÇADOR */
-        .epub-primeiro-paragrafo {
-            font-weight: 700 !important;
-            color: ${currentHighlight} !important;
-            font-variant: small-caps !important;
-            text-transform: lowercase !important;
-            letter-spacing: 0.5px !important;
-            ${literataFixBold}
-        }
-
-        /* O Pulo do Gato: Captura os spans da primeira frase e força a cor escura neles */
-        .epub-primeiro-paragrafo span,
-        .epub-primeiro-paragrafo strong,
-        .epub-primeiro-paragrafo b {
+        /* Captura as tags iniciais geralmente usadas pelas editoras para destacar o começo de capítulo */
+        p:first-of-type > span,
+        p:first-of-type > strong,
+        p:first-of-type > b,
+        p > span:first-child,
+        p > strong:first-child,
+        p > b:first-child {
             color: ${currentHighlight} !important;
             font-weight: 700 !important;
-            ${literataFixBold}
         }
     `;
 }
