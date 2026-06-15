@@ -17,7 +17,6 @@ body { background: #f5f5f7; color: #333; overflow: hidden; touch-action: none; t
 /* ======== LEITOR EPUB ======== */
 #reader-view { position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; background: #FDF7EC; }
 
-/* O viewer mantém a mesma trava física, mas ganhou box-sizing para engolir o padding no JS */
 #viewer { 
     width: 100%; 
     height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 20px);
@@ -25,7 +24,7 @@ body { background: #f5f5f7; color: #333; overflow: hidden; touch-action: none; t
     top: calc(env(safe-area-inset-top) + 10px); 
     left: 0; 
     z-index: 10;
-    box-sizing: border-box; /* Fundamental para o V6 funcionar */
+    box-sizing: border-box; 
 }
 
 #brightness-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: black; opacity: 0; pointer-events: none; z-index: 15; transition: opacity 0.2s; }
@@ -33,7 +32,7 @@ body { background: #f5f5f7; color: #333; overflow: hidden; touch-action: none; t
 /* Barras de Interface */
 .ui-bar { position: absolute; left: 0; width: 100%; background: #ffffff; z-index: 50; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 0 15px rgba(0,0,0,0.08); transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
 #top-bar { top: 0; height: calc(55px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); padding-left: 15px; padding-right: 15px; border-bottom: 1px solid #eee; }
-#bottom-bar { bottom: 0; height: calc(50px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); padding-left: 20px; padding-right: 20px; border-top: 1px solid #eee; gap: 15px; }
+#bottom-bar { bottom: 0; height: calc(50px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); padding-left: 20px; padding-right: 20px; border-top: 1px solid #eee; gap: 10px; }
 
 .ui-bar.hidden { transform: translateY(-100%); display: flex !important; }
 #bottom-bar.hidden { transform: translateY(100%); display: flex !important; }
@@ -44,11 +43,11 @@ body { background: #f5f5f7; color: #333; overflow: hidden; touch-action: none; t
 .top-bar-right { display: flex; gap: 5px; align-items: center; }
 .icon-btn { background: none; border: none; font-size: 15px; color: #555; cursor: pointer; padding: 8px; font-weight: 500; }
 .font-weight-bold { font-family: 'Literata', serif; font-weight: bold; }
-.highlight-btn { color: #1a73e8; font-size: 16px; }
-.highlight-btn.saved { color: #34a853; }
+.highlight-btn { color: #555; font-size: 16px; }
+.highlight-btn.saved svg { fill: #1a73e8; stroke: #1a73e8; }
 
 #progress-slider { flex: 1; accent-color: #1a73e8; }
-#progress-label { font-size: 12px; color: #666; font-weight: 600; min-width: 90px; text-align: right; }
+#progress-label { font-size: 14px; color: #666; font-weight: 600; min-width: 80px; text-align: right; font-variant-numeric: tabular-nums; }
 
 #touch-zones { position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; display: flex; z-index: 20; }
 #zone-left { width: 25%; } #zone-center { width: 50%; } #zone-right { width: 25%; }
