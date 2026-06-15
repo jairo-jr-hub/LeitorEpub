@@ -27,16 +27,12 @@ function fecharMenus() {
     tocModal.classList.add('hidden');
 }
 
-// --- SALVAMENTO ROBUSTO (Manual e Automático) ---
+// --- SALVAMENTO ROBUSTO (Manual e Automático Otimizado para iOS) ---
 async function salvarPosicao(cfi) {
     if (!currentBookId || !cfi) return;
     try {
-        const library = await localforage.getItem('library_metadata') || [];
-        const bookIndex = library.findIndex(b => b.id === currentBookId);
-        if (bookIndex !== -1) {
-            library[bookIndex].cfi = cfi;
-            await localforage.setItem('library_metadata', library);
-        }
+        // Salva apenas a string da posição direto no localStorage. Leve e instantâneo.
+        localStorage.setItem(`pos_${currentBookId}`, cfi);
     } catch (e) {
         console.error("Erro ao salvar progresso:", e);
     }
@@ -64,6 +60,7 @@ async function loadLibrary() {
             e.stopPropagation();
             if (confirm(`Excluir permanentemente o livro "${bookMeta.title}" do leitor?`)) {
                 await localforage.removeItem(bookMeta.id);
+                localStorage.removeItem(`pos_${bookMeta.id}`); // Limpa o progresso também
                 const novaBiblioteca = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', novaBiblioteca);
                 loadLibrary();
@@ -110,7 +107,7 @@ fileInput.addEventListener('change', async (e) => {
         const bookId = 'book_' + Date.now();
         await localforage.setItem(bookId, arrayBuffer);
         const library = await localforage.getItem('library_metadata') || [];
-        library.push({ id: bookId, title: metadata.title, cover: coverBase64, cfi: null });
+        library.push({ id: bookId, title: metadata.title, cover: coverBase64 });
         await localforage.setItem('library_metadata', library);
         await loadLibrary();
     } catch (error) { alert("Erro ao processar o arquivo."); } 
@@ -147,18 +144,21 @@ async function openBook(bookId) {
         rendition.themes.select(readerSettings.theme);
         rendition.themes.fontSize(readerSettings.fontSize + "%");
         
-        // Dispara o injeção de estilo avançado sempre que um novo capítulo é desenhado
+        // Dispara a injeção de estilo avançado sempre que um novo capítulo é desenhado
         rendition.hooks.content.register((contents) => {
             aplicarEstilosNoConteudo(contents);
         });
 
         aplicarConfiguracoesDinamicas();
 
-        const library = await localforage.getItem('library_metadata');
-        const bookMeta = library.find(b => b.id === bookId);
+        const savedCfi = localStorage.getItem(`pos_${bookId}`);
         
-        if (bookMeta && bookMeta.cfi) {
-            try { await rendition.display(bookMeta.cfi); } catch(e) { await rendition.display(); }
+        if (savedCfi) {
+            try { 
+                await rendition.display(savedCfi); 
+            } catch(e) { 
+                await rendition.display(); 
+            }
         } else {
             await rendition.display();
         }
@@ -298,7 +298,7 @@ function aplicarConfiguracoesDinamicas() {
     rendition.themes.select(readerSettings.theme);
     
     const bgColors = { 'light': '#ffffff', 'sepia': '#fefbec', 'dark': '#121212' };
-    const textColors = { 'light': '#000000', 'sepia': '#5e4e43', 'dark': '#e0e0e0' };
+    const textColors = { 'light': '#000000', 'sepia': '#3a2d24', 'dark': '#e0e0e0' }; // Cor do texto mais escura
     const currentBgColor = bgColors[readerSettings.theme];
     
     readerView.style.background = currentBgColor;
@@ -356,8 +356,11 @@ function aplicarEstilosNoConteudo(content) {
         doc.head.appendChild(style);
     }
 
-    const textColors = { 'light': '#000000', 'sepia': '#5e4e43', 'dark': '#e0e0e0' };
-    const highlightColors = { 'light': '#000000', 'sepia': '#21160e', 'dark': '#ffffff' }; // Cor forte (#21160e) para Destaques
+    // Cores gerais mais escuras
+    const textColors = { 'light': '#000000', 'sepia': '#3a2d24', 'dark': '#e0e0e0' };
+    
+    // Destaques (negrito, títulos e primeira frase) praticamente pretos
+    const highlightColors = { 'light': '#000000', 'sepia': '#110a05', 'dark': '#ffffff' }; 
     
     const currentText = textColors[readerSettings.theme];
     const currentHighlight = highlightColors[readerSettings.theme];
@@ -402,6 +405,15 @@ function aplicarEstilosNoConteudo(content) {
             font-variant: small-caps !important;
             text-transform: lowercase !important;
             letter-spacing: 0.5px !important;
+            ${literataFixBold}
+        }
+
+        /* O Pulo do Gato: Captura os spans da primeira frase e força a cor escura neles */
+        .epub-primeiro-paragrafo span,
+        .epub-primeiro-paragrafo strong,
+        .epub-primeiro-paragrafo b {
+            color: ${currentHighlight} !important;
+            font-weight: 700 !important;
             ${literataFixBold}
         }
     `;
