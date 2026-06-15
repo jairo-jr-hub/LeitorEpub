@@ -123,10 +123,7 @@ async function openBook(bookId) {
         });
 
         rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
-        
-        // Cores matematicamente idênticas extraídas via conta-gotas
         rendition.themes.register("sepia", { "body": { "background": "#f9f1e2 !important", "color": "#3e2a1e !important" }});
-        
         rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
         
         rendition.themes.select(readerSettings.theme);
@@ -149,7 +146,6 @@ async function openBook(bookId) {
             await rendition.display();
         }
 
-        // Sumário
         currentBook.loaded.navigation.then(nav => {
             const tocList = document.getElementById('toc-list');
             tocList.innerHTML = '';
@@ -274,7 +270,8 @@ function salvarConfig() { localStorage.setItem('reader_settings', JSON.stringify
 function aplicarConfiguracoesDinamicas() {
     if (!rendition) return;
     
-    // Matriz de cores exata garantida globalmente
+    rendition.themes.select(readerSettings.theme);
+    
     const bgColors = { 'light': '#ffffff', 'sepia': '#f9f1e2', 'dark': '#121212' };
     const textColors = { 'light': '#000000', 'sepia': '#3e2a1e', 'dark': '#e0e0e0' };
     const currentBgColor = bgColors[readerSettings.theme];
@@ -298,12 +295,19 @@ function aplicarConfiguracoesDinamicas() {
     aplicarBrilho();
 }
 
+// O motor de correção científica para forçar a Fonte Variável a ficar fina e limpa no iPhone
 function atualizarStylesInjetados() {
     if (!rendition) return;
     
     const textColors = { 'light': '#000000', 'sepia': '#3e2a1e', 'dark': '#e0e0e0' };
     const currentColor = textColors[readerSettings.theme];
+    
+    const isLiterata = readerSettings.fontFamily.includes('Literata');
     const fontToApply = readerSettings.fontFamily !== 'Original' ? `font-family: ${readerSettings.fontFamily} !important;` : '';
+    
+    // As variáveis exatas usadas pelo Google para impedir o falso negrito no iOS
+    const literataFixNorm = isLiterata ? 'font-variation-settings: "opsz" 14, "wght" 400 !important;' : '';
+    const literataFixBold = isLiterata ? 'font-variation-settings: "opsz" 14, "wght" 700 !important;' : '';
 
     try {
         rendition.getContents().forEach(content => {
@@ -335,6 +339,18 @@ function atualizarStylesInjetados() {
                 body, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
                     color: ${currentColor} !important;
                     ${fontToApply}
+                }
+                
+                /* Força o parágrafo normal a ficar na espessura 400 exata */
+                p, div, li, body {
+                    font-weight: 400 !important;
+                    ${literataFixNorm}
+                }
+                
+                /* Preserva títulos e negritos na espessura correta */
+                b, strong, h1, h2, h3, h4, h5, h6 {
+                    font-weight: 700 !important;
+                    ${literataFixBold}
                 }
             `;
         });
