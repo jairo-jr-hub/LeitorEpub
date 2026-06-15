@@ -13,12 +13,11 @@ const DOM = {
     bookmarksList: document.getElementById('bookmarks-list'),
     progressSlider: document.getElementById('progress-slider'),
     progressLabel: document.getElementById('progress-label'),
+    btnQuickSave: document.getElementById('btn-quick-save'),
     btnOpenBookmarks: document.getElementById('btn-open-bookmarks'),
-    btnAddBookmark: document.getElementById('btn-add-bookmark'),
     btnOpenToc: document.getElementById('btn-open-toc')
 };
 
-// Segurança Mestra
 const SafeStorage = {
     set(key, value) { try { localStorage.setItem(key, value); return true; } catch (e) { return false; } },
     get(key) { try { return localStorage.getItem(key); } catch (e) { return null; } },
@@ -30,17 +29,13 @@ let rendition = null;
 let currentBookId = null;
 let currentLocationCfi = null; 
 let isLocationsReady = false;
-let isBookReady = false; // <--- A TRAVA QUE RESOLVEU O BUG!
 let totalPages = 1;
 
-let settings = JSON.parse(localStorage.getItem('reader_v9_configs')) || {
+let settings = JSON.parse(localStorage.getItem('reader_v10_configs')) || {
     font: "'Literata', serif", size: 100, lineHeight: 1.5, align: "justify", theme: "sepia", brightness: 100, paddingY: 60
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Atualizei visualmente no HTML pra você saber que pegou o script novo
-    document.querySelector('header h1').innerHTML = 'Biblioteca <span style="font-size: 12px; background: #0f9d58; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle;">v9</span>';
-    document.title = "Leitor EPUB PRO - v9";
     carregarBiblioteca();
     carregarUIConfigs();
 });
@@ -69,8 +64,7 @@ async function carregarBiblioteca() {
             e.stopPropagation();
             if (confirm(`Excluir "${bookMeta.title}" do aplicativo?`)) {
                 await localforage.removeItem(bookMeta.id); 
-                SafeStorage.remove('cfi_v9_' + bookMeta.id); 
-                SafeStorage.remove('bookmarks_v9_' + bookMeta.id); 
+                SafeStorage.remove('bookmarks_v10_' + bookMeta.id); 
                 const nova = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', nova); 
                 carregarBiblioteca();
@@ -131,18 +125,16 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. MOTOR E SALVAMENTO BLINDADO (V9)
+// 2. MOTOR DE LEITURA (SEM AUTO-SAVE)
 // ==========================================
 async function abrirLivro(bookId) {
     currentBookId = bookId;
     currentLocationCfi = null;
     isLocationsReady = false;
-    isBookReady = false; // Tranca o Auto-Save
-    
     DOM.library.classList.add('hidden');
     DOM.reader.classList.remove('hidden');
     esconderMenus();
-    DOM.progressLabel.textContent = "Lendo...";
+    DOM.progressLabel.textContent = "Carregando...";
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
@@ -168,27 +160,9 @@ async function abrirLivro(bookId) {
         aplicarEstilosNoMotor();
         gerarSumario();
         
-        // Pega a página correta da V9
-        let cfiSalvo = SafeStorage.get('cfi_v9_' + bookId);
-        if (!cfiSalvo) {
-            const library = await localforage.getItem('library_metadata');
-            const bookMeta = library.find(b => b.id === bookId);
-            if (bookMeta && bookMeta.cfi) cfiSalvo = bookMeta.cfi;
-        }
-        
-        try {
-            if (cfiSalvo) await rendition.display(cfiSalvo);
-            else await rendition.display();
-            currentLocationCfi = rendition.location ? rendition.location.start.cfi : cfiSalvo;
-        } catch(e) {
-            await rendition.display();
-            currentLocationCfi = rendition.location ? rendition.location.start.cfi : null;
-        }
-
-        // AGORA SIM: O livro terminou de abrir e renderizar. Podemos destrancar o Auto-Save!
-        setTimeout(() => {
-            isBookReady = true; 
-        }, 500); // 500ms de margem de segurança pro iOS assentar o layout
+        // SEMPRE ABRE NO INÍCIO AGORA. Você controla indo na sua lista de marcadores.
+        await rendition.display();
+        currentLocationCfi = rendition.location ? rendition.location.start.cfi : null;
 
         book.ready.then(() => book.locations.generate(1600)).then(() => {
             isLocationsReady = true;
@@ -196,13 +170,10 @@ async function abrirLivro(bookId) {
             atualizarProgresso(currentLocationCfi);
         });
 
-        // O vilão domado: O 'relocated' agora ignora o lixo do carregamento
+        // Atualiza apenas a barra de progresso visual, sem gravar NADA escondido.
         rendition.on('relocated', (location) => {
-            if (!isBookReady) return; // Se o livro estiver carregando, IGNORE!
-            
             if (location && location.start && location.start.cfi) {
                 currentLocationCfi = location.start.cfi;
-                SafeStorage.set('cfi_v9_' + currentBookId, currentLocationCfi);
                 atualizarProgresso(currentLocationCfi);
             }
         });
@@ -214,14 +185,15 @@ async function abrirLivro(bookId) {
 }
 
 // ==========================================
-// A LISTA DE MARCADORES (MANTIDA E APRIMORADA)
+// A LISTA DE MARCADORES (O SEU SALVAMENTO MANUAL)
 // ==========================================
+
 function carregarMarcadores() {
-    let bookmarks = JSON.parse(SafeStorage.get('bookmarks_v9_' + currentBookId)) || [];
+    let bookmarks = JSON.parse(SafeStorage.get('bookmarks_v10_' + currentBookId)) || [];
     DOM.bookmarksList.innerHTML = '';
     
     if (bookmarks.length === 0) {
-        DOM.bookmarksList.innerHTML = '<li style="justify-content:center; color:#999; font-weight:normal;">Nenhum marcador salvo ainda.</li>';
+        DOM.bookmarksList.innerHTML = '<li style="justify-content:center; color:#999; font-weight:normal;">Você ainda não salvou nenhuma página.</li>';
         return;
     }
 
@@ -233,11 +205,7 @@ function carregarMarcadores() {
         textSpan.style.flex = "1";
         textSpan.onclick = () => {
             if (rendition && bm.cfi) {
-                // Ao clicar num marcador, a gente tranca o Auto-Save rápido pra ele não bugar no salto
-                isBookReady = false; 
-                rendition.display(bm.cfi).then(() => {
-                    setTimeout(() => { isBookReady = true; }, 500);
-                });
+                rendition.display(bm.cfi);
             }
             esconderMenus();
         };
@@ -248,7 +216,7 @@ function carregarMarcadores() {
         delBtn.onclick = (e) => {
             e.stopPropagation();
             bookmarks.splice(index, 1);
-            SafeStorage.set('bookmarks_v9_' + currentBookId, JSON.stringify(bookmarks));
+            SafeStorage.set('bookmarks_v10_' + currentBookId, JSON.stringify(bookmarks));
             carregarMarcadores();
         };
 
@@ -258,7 +226,8 @@ function carregarMarcadores() {
     });
 }
 
-DOM.btnAddBookmark.addEventListener('click', () => {
+// O BOTÃO DE SALVAMENTO RÁPIDO (Mantém só a última página salva)
+DOM.btnQuickSave.addEventListener('click', () => {
     const loc = rendition.currentLocation();
     const cfiExato = loc ? loc.start.cfi : currentLocationCfi;
     
@@ -267,48 +236,41 @@ DOM.btnAddBookmark.addEventListener('click', () => {
         return;
     }
 
-    let bookmarks = JSON.parse(SafeStorage.get('bookmarks_v9_' + currentBookId)) || [];
-    
-    let labelNome = "Página Salva";
+    let labelNome = "Última Página Lida";
     if (isLocationsReady && book && book.locations.length > 0) {
         const pct = Math.round(book.locations.percentageFromCfi(cfiExato) * 100);
-        labelNome = `Marcador (${pct}%)`;
-    } else {
-        const d = new Date();
-        labelNome = `Marcador - ${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`;
+        labelNome = `Página Salva (${pct}%)`;
     }
 
-    bookmarks.push({ cfi: cfiExato, label: labelNome });
-    SafeStorage.set('bookmarks_v9_' + currentBookId, JSON.stringify(bookmarks));
+    // A Mágica: Ele cria uma array contendo APENAS a sua última página. Nunca acumula.
+    let bookmarks = [{ cfi: cfiExato, label: labelNome }];
+    
+    SafeStorage.set('bookmarks_v10_' + currentBookId, JSON.stringify(bookmarks));
     carregarMarcadores();
 
-    DOM.btnAddBookmark.textContent = "✔ Salvo!";
-    setTimeout(() => { DOM.btnAddBookmark.textContent = "+ Adicionar"; }, 2000);
+    // Feedback Visual de Sucesso
+    DOM.btnQuickSave.textContent = "✔ Salvo!";
+    DOM.btnQuickSave.style.color = "#34a853";
+    
+    setTimeout(() => { 
+        DOM.btnQuickSave.textContent = "Salvar"; 
+        DOM.btnQuickSave.style.color = "#333";
+    }, 2000);
 });
 
-// Fecha e Salva
+
 function fecharLivro() {
-    if (currentBookId && currentLocationCfi) {
-        SafeStorage.set('cfi_v9_' + currentBookId, currentLocationCfi);
-    }
     if (book) { book.destroy(); book = null; rendition = null; }
     document.getElementById('viewer').innerHTML = '';
-    currentBookId = null; currentLocationCfi = null; isLocationsReady = false; isBookReady = false;
+    currentBookId = null; currentLocationCfi = null; isLocationsReady = false;
     DOM.reader.classList.add('hidden');
     DOM.library.classList.remove('hidden');
     document.body.style.background = '#f5f5f7';
     document.getElementById('theme-color-meta').setAttribute('content', '#f5f5f7');
 }
 
-// Auto-Save brutal do iOS
-document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === 'hidden' && currentBookId && currentLocationCfi && isBookReady) {
-        SafeStorage.set('cfi_v9_' + currentBookId, currentLocationCfi);
-    }
-});
-
 // ==========================================
-// 3. PÁGINA X DE Y MATEMÁTICO E SUMÁRIO 
+// 3. PÁGINA X DE Y MATEMÁTICO E SUMÁRIO
 // ==========================================
 function gerarSumario() {
     book.loaded.navigation.then(nav => {
@@ -327,11 +289,7 @@ function gerarSumario() {
                 }
 
                 li.onclick = () => {
-                    // Tranca o Auto-Save ao pular de capítulo também
-                    isBookReady = false;
-                    rendition.display(chapter.href).then(() => {
-                        setTimeout(() => { isBookReady = true; }, 500);
-                    });
+                    rendition.display(chapter.href);
                     esconderMenus();
                 };
                 DOM.tocList.appendChild(li);
@@ -358,11 +316,7 @@ DOM.progressSlider.addEventListener('change', (e) => {
     if (book && book.locations.length > 0) {
         const percent = e.target.value / 100;
         const targetCfi = book.locations.cfiFromPercentage(percent);
-        
-        isBookReady = false; // Tranca enquanto o slider arrasta
-        rendition.display(targetCfi).then(() => {
-            setTimeout(() => { isBookReady = true; }, 500);
-        });
+        rendition.display(targetCfi);
     }
 });
 
@@ -376,11 +330,8 @@ async function alterarConfiguracaoLayout(callback) {
     salvarConfigs(); 
     
     if (rendition) {
-        isBookReady = false; // Tranca!
         rendition.resize(); 
         if (cfiAtual) await rendition.display(cfiAtual);
-        
-        setTimeout(() => { isBookReady = true; }, 500); // Destranca!
         
         DOM.progressLabel.textContent = "... / ...";
         isLocationsReady = false;
@@ -433,7 +384,7 @@ function aplicarEstilosNoMotor() {
 }
 
 function salvarConfigs() {
-    SafeStorage.set('reader_v9_configs', JSON.stringify(settings));
+    SafeStorage.set('reader_v10_configs', JSON.stringify(settings));
     aplicarEstilosNoMotor();
 }
 
@@ -464,16 +415,19 @@ function esconderMenus() {
     DOM.settingsModal.classList.add('hidden'); DOM.tocModal.classList.add('hidden'); DOM.bookmarksModal.classList.add('hidden');
 }
 
+// Botões Sup
 document.getElementById('btn-back').addEventListener('click', fecharLivro); 
 document.getElementById('btn-settings').addEventListener('click', () => { esconderMenus(); DOM.settingsModal.classList.remove('hidden'); });
 DOM.btnOpenToc.addEventListener('click', () => { esconderMenus(); DOM.tocModal.classList.remove('hidden'); });
 
+// Botão Abre a Lista de Marcadores
 DOM.btnOpenBookmarks.addEventListener('click', () => {
     esconderMenus();
     DOM.bookmarksModal.classList.remove('hidden');
     carregarMarcadores(); 
 });
 
+// Abas de Config
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -483,6 +437,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
+// Controles Visuais
 document.querySelectorAll('.font-btn').forEach(btn => { btn.addEventListener('click', (e) => { alterarConfiguracaoLayout(() => { settings.font = e.currentTarget.dataset.font; }); }); });
 document.getElementById('btn-size-minus').addEventListener('click', () => { alterarConfiguracaoLayout(() => { if (settings.size > 70) settings.size -= 10; }); });
 document.getElementById('btn-size-plus').addEventListener('click', () => { alterarConfiguracaoLayout(() => { if (settings.size < 250) settings.size += 10; }); });
