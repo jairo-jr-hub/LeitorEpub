@@ -35,7 +35,15 @@
         
         <div id="top-bar" class="floating-bar">
             <button id="btn-back" class="icon-btn">✕</button>
-            <button id="btn-aa" class="icon-btn font-weight-bold">Aa</button>
+            <div style="display: flex; gap: 5px;">
+                <button id="btn-toc" class="icon-btn" style="font-weight: bold; font-size: 22px;">☰</button>
+                <button id="btn-aa" class="icon-btn font-weight-bold">Aa</button>
+            </div>
+        </div>
+
+        <div id="toc-modal" class="hidden">
+            <h2 style="margin-bottom: 15px; font-size: 20px;">Sumário</h2>
+            <ul id="toc-list"></ul>
         </div>
 
         <div id="settings-modal" class="hidden">
