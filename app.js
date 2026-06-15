@@ -18,6 +18,7 @@ const DOM = {
 let book = null;
 let rendition = null;
 let currentBookId = null;
+let currentLocationCfi = null; // RASTREADOR: Guarda sempre a página atual!
 
 let settings = JSON.parse(localStorage.getItem('reader_pro_configs')) || {
     font: "'Literata', serif",
@@ -123,10 +124,11 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. MOTOR DE LEITURA (EPUB.JS)
+// 2. MOTOR DE LEITURA E SALVAMENTO
 // ==========================================
 async function abrirLivro(bookId) {
     currentBookId = bookId;
+    currentLocationCfi = null;
     DOM.library.classList.add('hidden');
     DOM.reader.classList.remove('hidden');
     esconderMenus();
@@ -162,16 +164,28 @@ async function abrirLivro(bookId) {
         const library = await localforage.getItem('library_metadata');
         const bookMeta = library.find(b => b.id === bookId);
         
-        rendition.display(bookMeta.cfi || undefined).then(() => {
-            book.locations.generate(1600).then(() => {
-                atualizarProgresso(rendition.location.start.cfi);
-            });
-            gerarSumario();
-        });
+        // Tenta exibir a página salva. Se der erro no CFI, volta pro início.
+        try {
+            await rendition.display(bookMeta.cfi || undefined);
+            currentLocationCfi = bookMeta.cfi || rendition.location.start.cfi;
+        } catch(e) {
+            await rendition.display();
+            currentLocationCfi = rendition.location.start.cfi;
+        }
 
+        book.locations.generate(1600).then(() => {
+            atualizarProgresso(currentLocationCfi);
+        });
+        gerarSumario();
+
+        // RASTREAMENTO REAL: Salva a localização toda vez que você vira a página
         rendition.on('relocated', (location) => {
             DOM.btnBookmark.classList.remove('saved');
-            if (location && location.start) atualizarProgresso(location.start.cfi);
+            DOM.btnBookmark.textContent = '📍'; // Reseta o botão
+            if (location && location.start) {
+                currentLocationCfi = location.start.cfi;
+                atualizarProgresso(currentLocationCfi);
+            }
         });
 
     } catch (e) {
@@ -180,27 +194,60 @@ async function abrirLivro(bookId) {
     }
 }
 
+// O BOTÃO DE SALVAR MANUAL
+DOM.btnBookmark.addEventListener('click', async () => {
+    if (currentLocationCfi && currentBookId) {
+        const library = await localforage.getItem('library_metadata');
+        const bookIndex = library.findIndex(b => b.id === currentBookId);
+        
+        if (bookIndex !== -1) {
+            library[bookIndex].cfi = currentLocationCfi;
+            await localforage.setItem('library_metadata', library);
+            DOM.btnBookmark.classList.add('saved');
+            DOM.btnBookmark.textContent = '✔ Salvo';
+        }
+    }
+});
+
+// A FUNÇÃO DE FECHAR O LIVRO COM AUTO-SAVE
+async function fecharLivro() {
+    // AUTO-SAVE DE SEGURANÇA: Se você sair sem salvar, ele salva pra você
+    if (currentLocationCfi && currentBookId) {
+        const library = await localforage.getItem('library_metadata');
+        const bookIndex = library.findIndex(b => b.id === currentBookId);
+        if (bookIndex !== -1) {
+            library[bookIndex].cfi = currentLocationCfi;
+            await localforage.setItem('library_metadata', library);
+        }
+    }
+
+    if (book) { book.destroy(); book = null; rendition = null; }
+    document.getElementById('viewer').innerHTML = '';
+    currentBookId = null;
+    currentLocationCfi = null;
+    
+    DOM.reader.classList.add('hidden');
+    DOM.library.classList.remove('hidden');
+    document.body.style.background = '#f5f5f7';
+    document.getElementById('theme-color-meta').setAttribute('content', '#f5f5f7');
+}
+
 // ==========================================
-// 3. NAVEGAÇÃO E MARCADOR (Atualizado)
+// 3. NAVEGAÇÃO
 // ==========================================
 function gerarSumario() {
     book.loaded.navigation.then(nav => {
         DOM.tocList.innerHTML = '';
-        
-        // Função Recursiva Inteligente
         const renderizarItens = (items, nivel = 0) => {
             items.forEach(chapter => {
                 const li = document.createElement('li');
                 li.textContent = chapter.label.trim();
                 
-                // Formatação visual baseada no nível (Parte vs Capítulo)
                 if (nivel > 0) {
-                    // É um subcapítulo
                     li.style.paddingLeft = `${nivel * 25}px`; 
                     li.style.fontSize = "14px";
                     li.style.opacity = "0.8"; 
                 } else {
-                    // É uma raiz (ex: "Parte 1")
                     li.style.fontWeight = "bold";
                 }
 
@@ -210,16 +257,12 @@ function gerarSumario() {
                 };
                 DOM.tocList.appendChild(li);
 
-                // Se houver subcapítulos (como Parte I -> Cap 1, 2, 3), roda a função de novo dentro dele
                 if (chapter.subitems && chapter.subitems.length > 0) {
                     renderizarItens(chapter.subitems, nivel + 1);
                 }
             });
         };
-
-        if (nav.toc) {
-            renderizarItens(nav.toc, 0);
-        }
+        if (nav.toc) { renderizarItens(nav.toc, 0); }
     });
 }
 
@@ -240,32 +283,8 @@ DOM.progressSlider.addEventListener('change', (e) => {
     }
 });
 
-DOM.btnBookmark.addEventListener('click', async () => {
-    if (rendition && rendition.location && currentBookId) {
-        const currentCfi = rendition.location.start.cfi;
-        const library = await localforage.getItem('library_metadata');
-        const bookIndex = library.findIndex(b => b.id === currentBookId);
-        
-        if (bookIndex !== -1) {
-            library[bookIndex].cfi = currentCfi;
-            await localforage.setItem('library_metadata', library);
-            DOM.btnBookmark.classList.add('saved');
-        }
-    }
-});
-
-function fecharLivro() {
-    if (book) { book.destroy(); book = null; rendition = null; }
-    document.getElementById('viewer').innerHTML = '';
-    currentBookId = null;
-    DOM.reader.classList.add('hidden');
-    DOM.library.classList.remove('hidden');
-    document.body.style.background = '#f5f5f7';
-    document.getElementById('theme-color-meta').setAttribute('content', '#f5f5f7');
-}
-
 // ==========================================
-// 4. MOTOR DE ESTILIZAÇÃO E MARGENS
+// 4. MOTOR DE ESTILIZAÇÃO E UI
 // ==========================================
 function aplicarEstilosNoMotor() {
     if (!rendition) return;
@@ -289,13 +308,14 @@ function aplicarEstilosNoMotor() {
 
     rendition.themes.fontSize(`${settings.size}%`);
 
+    // AS MARGENS DE 60PX FORAM RETIRADAS DAQUI PARA FICAREM ISOLADAS NO CSS
     rendition.themes.default({
         "body": {
             "font-family": settings.font === 'Original' ? "inherit !important" : `${settings.font} !important`,
             "text-align": `${settings.align} !important`,
             "line-height": `${settings.lineHeight} !important`,
             "color": `${textCor} !important`,
-            "padding": "60px 20px 60px 20px !important" 
+            "padding": "0 20px !important" 
         },
         "p": {
             "text-align": `${settings.align} !important`,
@@ -362,7 +382,7 @@ document.getElementById('btn-settings').addEventListener('click', () => {
     DOM.tocModal.classList.add('hidden');
     DOM.settingsModal.classList.toggle('hidden');
 });
-document.getElementById('btn-back').addEventListener('click', fecharLivro);
+document.getElementById('btn-back').addEventListener('click', fecharLivro); // Auto-save ativado aqui!
 DOM.btnOpenToc.addEventListener('click', () => {
     DOM.settingsModal.classList.add('hidden');
     DOM.tocModal.classList.toggle('hidden');
