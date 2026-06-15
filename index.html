@@ -2,80 +2,105 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Leitor EPUB - Versão 1</title>
-    <link rel="stylesheet" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta id="theme-color-meta" name="theme-color" content="#FDF7EC">
+    <title>Meu Leitor EPUB - v1 Premium</title>
     
+    <link rel="stylesheet" href="style.css">
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap" rel="stylesheet">
-    
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.5/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 </head>
-<body class="theme-sepia">
+<body>
 
-    <div id="startup-screen">
-        <h1>Leitor EPUB</h1>
-        <p class="subtitle">Versão 1.0 - Estilo Play Livros</p>
-        <label for="book-upload" class="upload-btn">Escolher Livro (.epub)</label>
-        <input type="file" id="book-upload" accept=".epub">
+    <div id="library-view">
+        <header>
+            <h1>Minha Biblioteca <small style="font-size: 0.5em; color: #888; font-weight: normal; vertical-align: middle;">v1.0</small></h1>
+            <label class="upload-btn">
+                Adicionar EPUB
+                <input type="file" id="file-input" accept=".epub" style="display: none;" />
+            </label>
+        </header>
+        <main id="bookshelf"></main>
     </div>
 
-    <div id="viewer" class="hidden"></div>
-
-    <div id="top-bar" class="ui-bar hidden">
-        <button id="btn-back">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        </button>
-        <button id="btn-aa"><strong>Aa</strong></button>
-    </div>
-
-    <div id="bottom-bar" class="ui-bar hidden">
-        <div class="progress-container">
-            <button id="prev-page">‹</button>
-            <span id="page-info">...</span>
-            <button id="next-page">›</button>
-        </div>
-    </div>
-
-    <div id="settings-modal" class="hidden">
-        <div class="settings-header">
-            <button id="tab-text" class="active">Texto</button>
-            <button id="tab-light">Iluminação</button>
-        </div>
+    <div id="reader-view" class="ui-hidden" style="display: none;">
         
-        <div id="panel-text" class="settings-panel">
-            <div class="font-selector">
-                <button class="font-btn active" data-font="Literata" style="font-family: 'Literata', serif;">
-                    <span class="font-icon">A</span>
-                    <small>Literata</small>
+        <div id="top-bar" class="floating-bar">
+            <button id="btn-back" class="icon-btn">✕</button>
+            <div style="display: flex; gap: 5px;">
+                <button id="btn-bookmark" class="icon-btn" title="Salvar Posição">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                    </svg>
                 </button>
-                <button class="font-btn" data-font="Helvetica" style="font-family: Helvetica, sans-serif;">
-                    <span class="font-icon">A</span>
-                    <small>Helvetica</small>
-                </button>
-                <button class="font-btn" data-font="Georgia" style="font-family: Georgia, serif;">
-                    <span class="font-icon">A</span>
-                    <small>Georgia</small>
-                </button>
+                <button id="btn-toc" class="icon-btn" style="font-weight: bold; font-size: 22px;">☰</button>
+                <button id="btn-aa" class="icon-btn font-weight-bold">Aa</button>
+            </div>
+        </div>
+
+        <div id="toc-modal" class="hidden">
+            <h2 style="margin-bottom: 15px; font-size: 20px; font-family: -apple-system, sans-serif;">Sumário</h2>
+            <ul id="toc-list"></ul>
+        </div>
+
+        <div id="settings-modal" class="hidden">
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="texto">Texto</button>
+                <button class="tab-btn" data-tab="iluminacao">Iluminação</button>
             </div>
             
-            <div class="controls-row">
-                <div class="size-selector">
-                    <button id="btn-size-down">A-</button>
-                    <span id="current-size">100%</span>
-                    <button id="btn-size-up">A+</button>
+            <div id="tab-texto" class="tab-content active">
+                <div class="font-carousel">
+                    <button class="font-btn" data-font="Original"><div class="circle">O</div><span>Original</span></button>
+                    <button class="font-btn selected" data-font="'Literata', serif"><div class="circle literata-circle">L</div><span>Literata</span></button>
+                    <button class="font-btn" data-font="Helvetica, sans-serif"><div class="circle">A</div><span>Helvetica</span></button>
+                    <button class="font-btn" data-font="Georgia, serif"><div class="circle">A</div><span>Georgia</span></button>
+                </div>
+                
+                <div class="controls-row">
+                    <div class="btn-group">
+                        <button id="btn-font-minus">T-</button>
+                        <span id="font-size-display">100%</span>
+                        <button id="btn-font-plus">T+</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-iluminacao" class="tab-content">
+                <div class="brightness-row">
+                    <span>🔅</span>
+                    <input type="range" id="brightness-slider" min="20" max="100" value="100">
+                    <span>🔆</span>
+                </div>
+                <div class="theme-carousel">
+                    <button class="theme-color-btn light" data-theme="light"></button>
+                    <button class="theme-color-btn sepia selected" data-theme="sepia"></button>
+                    <button class="theme-color-btn dark" data-theme="dark"></button>
                 </div>
             </div>
         </div>
+        
+        <div id="viewer"></div>
+        <div id="brightness-overlay"></div>
 
-        <div id="panel-light" class="settings-panel hidden">
-            <div class="theme-selector">
-                <button class="theme-btn" data-theme="light" style="background: #FFFFFF; border: 1px solid #E0E0E0;"></button>
-                <button class="theme-btn active" data-theme="sepia" style="background: #FDF7EC; border: 1px solid #D7CDBB;"></button>
-                <button class="theme-btn" data-theme="dark" style="background: #121212; border: 1px solid #333333;"></button>
-            </div>
+        <div id="bottom-bar" class="floating-bar">
+            <button class="icon-btn" style="font-size: 16px;">📑</button>
+            <input type="range" id="progress-slider" min="0" max="100" value="0">
+            <span id="page-info">-- %</span>
+        </div>
+
+        <div id="touch-zones">
+            <div id="zone-left"></div>
+            <div id="zone-center"></div>
+            <div id="zone-right"></div>
         </div>
     </div>
 
