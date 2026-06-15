@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta id="theme-color-meta" name="theme-color" content="#FDF7EC">
-    <title>Meu Leitor EPUB - v1 Premium</title>
+    <meta id="theme-color-meta" name="theme-color" content="#fefbec">
+    <title>Meu Leitor EPUB</title>
     
     <link rel="stylesheet" href="style.css">
 
@@ -22,7 +22,7 @@
 
     <div id="library-view">
         <header>
-            <h1>Minha Biblioteca <small style="font-size: 0.5em; color: #888; font-weight: normal; vertical-align: middle;">v1.0</small></h1>
+            <h1>Minha Biblioteca <small style="font-size: 0.5em; color: #888; font-weight: normal; vertical-align: middle;">v1</small></h1>
             <label class="upload-btn">
                 Adicionar EPUB
                 <input type="file" id="file-input" accept=".epub" style="display: none;" />
@@ -47,7 +47,7 @@
         </div>
 
         <div id="toc-modal" class="hidden">
-            <h2 style="margin-bottom: 15px; font-size: 20px; font-family: -apple-system, sans-serif;">Sumário</h2>
+            <h2 style="margin-bottom: 15px; font-size: 20px;">Sumário</h2>
             <ul id="toc-list"></ul>
         </div>
 
@@ -60,16 +60,16 @@
             <div id="tab-texto" class="tab-content active">
                 <div class="font-carousel">
                     <button class="font-btn" data-font="Original"><div class="circle">O</div><span>Original</span></button>
-                    <button class="font-btn selected" data-font="'Literata', serif"><div class="circle literata-circle">L</div><span>Literata</span></button>
-                    <button class="font-btn" data-font="Helvetica, sans-serif"><div class="circle">A</div><span>Helvetica</span></button>
-                    <button class="font-btn" data-font="Georgia, serif"><div class="circle">A</div><span>Georgia</span></button>
+                    <button class="font-btn selected" data-font="'Literata', serif"><div class="circle literata-circle">A</div><span>Literata</span></button>
+                    <button class="font-btn" data-font="Helvetica, sans-serif"><div class="circle" style="font-family: Helvetica;">A</div><span>Helvetica</span></button>
+                    <button class="font-btn" data-font="Georgia, serif"><div class="circle" style="font-family: Georgia;">A</div><span>Georgia</span></button>
                 </div>
                 
                 <div class="controls-row">
                     <div class="btn-group">
-                        <button id="btn-font-minus">T-</button>
+                        <button id="btn-font-minus">A-</button>
                         <span id="font-size-display">100%</span>
-                        <button id="btn-font-plus">T+</button>
+                        <button id="btn-font-plus">A+</button>
                     </div>
                 </div>
             </div>
@@ -92,7 +92,7 @@
         <div id="brightness-overlay"></div>
 
         <div id="bottom-bar" class="floating-bar">
-            <button class="icon-btn" style="font-size: 16px;">📑</button>
+            <button class="icon-btn">📑</button>
             <input type="range" id="progress-slider" min="0" max="100" value="0">
             <span id="page-info">-- %</span>
         </div>
