@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Google Play Livros - Clone</title>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.5/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet" />
+
+    <style>
+        :root {
+            --google-blue: #1a73e8;
+            --google-blue-hover: #1557b0;
+            --text-primary: #202124;
+            --text-secondary: #5f6368;
+            --border-color: #dadce0;
+            --bg-color: #ffffff;
+        }
+
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            overflow-x: hidden;
+        }
+
+        /* =========================================
+           TELA DA BIBLIOTECA (LIBRARY VIEW)
+           ========================================= */
+        #library-view {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            padding: 12px 24px;
+            border-bottom: 1px solid var(--border-color);
+            gap: 20px;
+        }
+
+        .header h1 {
+            font-family: 'Google Sans', sans-serif;
+            font-size: 22px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header h1 img { height: 28px; }
+
+        .tabs {
+            display: flex;
+            gap: 20px;
+            padding: 0 24px;
+            margin-top: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tab {
+            font-family: 'Google Sans', sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            padding: 10px 0;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab.active {
+            color: var(--google-blue);
+            border-bottom-color: var(--google-blue);
+        }
+
+        .content-area {
+            padding: 30px 24px;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .section-title {
+            font-family: 'Google Sans', sans-serif;
+            font-size: 20px;
+            margin-bottom: 20px;
+        }
+
+        .upload-container {
+            margin-bottom: 30px;
+        }
+
+        .btn-upload {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--google-blue);
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.2s;
+        }
+
+        .btn-upload:hover { background: #f8f9fa; }
+        input[type="file"] { display: none; }
+
+        .book-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 24px;
+        }
+
+        .book-card {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .book-card:hover { transform: scale(1.02); }
+
+        .book-cover {
+            width: 100%;
+            aspect-ratio: 2 / 3;
+            background-color: #f1f3f4;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            object-fit: cover;
+            margin-bottom: 12px;
+        }
+
+        .book-title {
+            font-size: 14px;
+            font-weight: 500;
+            line-height: 1.2;
+            margin-bottom: 4px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .book-author {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* =========================================
+           TELA DO LEITOR (READER VIEW)
+           ========================================= */
+        #reader-view {
+            display: none; /* Escondido por padrão */
+            flex-direction: column;
+            height: 100vh;
+            width: 100vw;
+            background: #ffffff;
+            position: fixed;
+            top: 0; left: 0;
+            z-index: 1000;
+        }
+
+        .reader-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 20px;
+            height: 48px;
+            background: #ffffff;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .reader-toolbar.bottom {
+            border-bottom: none;
+            border-top: 1px solid var(--border-color);
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .toolbar-left, .toolbar-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .icon-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px;
+            border-radius: 50%;
+        }
+
+        .icon-btn:hover { background: #f1f3f4; color: var(--text-primary); }
+
+        #reader-title {
+            font-family: 'Google Sans', sans-serif;
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        #viewer-container {
+            flex-grow: 1;
+            position: relative;
+            height: calc(100vh - 100px); /* Subtrai toolbars */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #viewer {
+            width: 100%;
+            height: 100%;
+            max-width: 1200px;
+        }
+
+        /* Controle de Progresso (Slider) */
+        .progress-container {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin: 0 20px;
+        }
+
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px; width: 16px;
+            border-radius: 50%;
+            background: var(--google-blue);
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px;
+            cursor: pointer;
+            background: #e8eaed;
+            border-radius: 2px;
+        }
+
+        #page-info {
+            font-size: 12px;
+            color: var(--text-secondary);
+            min-width: 60px;
+            text-align: right;
+        }
+
+        /* Telas Menores (Mobile) */
+        @media (max-width: 768px) {
+            #reader-title { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="library-view">
+        <header class="header">
+            <span class="material-symbols-outlined" style="color: var(--google-blue); font-size: 32px;">play_prism</span>
+            <h1>Google Play Livros</h1>
+        </header>
+
+        <div class="tabs">
+            <div class="tab active">E-books</div>
+            <div class="tab">Audiolivros</div>
+            <div class="tab">Sua biblioteca</div>
+        </div>
+
+        <main class="content-area">
+            <div class="upload-container">
+                <label for="epub-upload" class="btn-upload">
+                    <span class="material-symbols-outlined">add</span>
+                    Adicionar EPUB
+                </label>
+                <input type="file" id="epub-upload" accept=".epub">
+            </div>
+
+            <h2 class="section-title">Enviados recentemente</h2>
+            <div class="book-grid" id="grid">
+                </div>
+        </main>
+    </div>
+
+    <div id="reader-view">
+        <div class="reader-toolbar">
+            <div class="toolbar-left">
+                <button class="icon-btn" onclick="closeBook()" title="Voltar à biblioteca">
+                    <span class="material-symbols-outlined">arrow_back</span>
+                </button>
+                <span id="reader-title">Título do Livro</span>
+            </div>
+            <div class="toolbar-right">
+                <button class="icon-btn"><span class="material-symbols-outlined">search</span></button>
+                <button class="icon-btn"><span class="material-symbols-outlined">format_size</span></button>
+                <button class="icon-btn"><span class="material-symbols-outlined">bookmark_border</span></button>
+                <button class="icon-btn"><span class="material-symbols-outlined">more_vert</span></button>
+            </div>
+        </div>
+
+        <div id="viewer-container">
+            <div id="viewer"></div>
+        </div>
+
+        <div class="reader-toolbar bottom">
+            <button class="icon-btn" onclick="if(rendition) rendition.prev()"><span class="material-symbols-outlined">chevron_left</span></button>
+            
+            <div class="progress-container">
+                <input type="range" id="progress-slider" min="0" max="100" value="0" step="1">
+            </div>
+
+            <span id="page-info">0%</span>
+            
+            <button class="icon-btn" onclick="if(rendition) rendition.next()"><span class="material-symbols-outlined">chevron_right</span></button>
+        </div>
+    </div>
+
+    <script>
+        // Referências da DOM
+        const libraryView = document.getElementById('library-view');
+        const readerView = document.getElementById('reader-view');
+        const fileInput = document.getElementById('epub-upload');
+        const grid = document.getElementById('grid');
+        const viewer = document.getElementById('viewer');
+        const titleEl = document.getElementById('reader-title');
+        const slider = document.getElementById('progress-slider');
+        const pageInfo = document.getElementById('page-info');
+
+        let currentBook = null;
+        let rendition = null;
+        let bookLocations = null;
+
+        // Banco de dados em memória para os livros carregados na sessão
+        const libraryDB = [];
+
+        // 1. LER ARQUIVO E GERAR PRÉVIA (CAPA)
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // Lê o arquivo binário direto para a memória
+            const arrayBuffer = await file.arrayBuffer();
+            
+            // Instancia o ePub só para extrair metadados e capa
+            const tempBook = ePub(arrayBuffer);
+            
+            try {
+                const metadata = await tempBook.loaded.metadata;
+                let coverUrl = await tempBook.coverUrl();
+                
+                // Salva no nosso BD temporário
+                const bookId = Date.now();
+                libraryDB.push({
+                    id: bookId,
+                    title: metadata.title || 'Livro sem título',
+                    author: metadata.creator || 'Autor desconhecido',
+                    cover: coverUrl || 'https://via.placeholder.com/150x220?text=Sem+Capa',
+                    buffer: arrayBuffer
+                });
+
+                renderLibrary();
+            } catch (error) {
+                console.error("Erro ao ler EPUB", error);
+                alert("Erro ao extrair informações do arquivo.");
+            }
+        });
+
+        // 2. RENDERIZAR A GRADE DE LIVROS (BIBLIOTECA)
+        function renderLibrary() {
+            grid.innerHTML = '';
+            libraryDB.forEach(book => {
+                const card = document.createElement('div');
+                card.className = 'book-card';
+                card.onclick = () => openBook(book.id);
+                
+                card.innerHTML = `
+                    <img src="${book.cover}" class="book-cover" alt="Capa">
+                    <div class="book-title">${book.title}</div>
+                    <div class="book-author">${book.author}</div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        // 3. ABRIR O LIVRO NO LEITOR
+        function openBook(id) {
+            const bookData = libraryDB.find(b => b.id === id);
+            if (!bookData) return;
+
+            // Troca de tela
+            libraryView.style.display = 'none';
+            readerView.style.display = 'flex';
+            titleEl.textContent = bookData.title;
+
+            // Limpa leitor anterior se houver
+            if (currentBook) currentBook.destroy();
+            viewer.innerHTML = '';
+
+            // Inicializa livro com as configurações do Play Livros
+            currentBook = ePub(bookData.buffer);
+            rendition = currentBook.renderTo("viewer", {
+                width: "100%",
+                height: "100%",
+                spread: "auto", // Página dupla no PC, única no Celular (mágica do ePub.js)
+                manager: "continuous",
+                flow: "paginated" // Cria o efeito de folhas ao invés de scroll infinito
+            });
+
+            rendition.display();
+
+            // Gera as localizações para fazer o Slider funcionar
+            currentBook.ready.then(() => {
+                return currentBook.locations.generate(1600);
+            }).then(locations => {
+                bookLocations = locations;
+                
+                // Atualiza a barrinha e a porcentagem quando vira a página
+                rendition.on('relocated', (location) => {
+                    const percent = currentBook.locations.percentageFromCfi(location.start.cfi);
+                    const percentage = Math.round(percent * 100);
+                    
+                    slider.value = percentage;
+                    pageInfo.textContent = `${percentage}%`;
+                });
+            });
+
+            // Permite navegação pelas setas do teclado no PC
+            document.addEventListener('keyup', handleKeyboard);
+        }
+
+        // 4. NAVEGAÇÃO PELO SLIDER
+        slider.addEventListener('change', (e) => {
+            if (!currentBook || !bookLocations) return;
+            const percentage = e.target.value / 100;
+            const cfi = currentBook.locations.cfiFromPercentage(percentage);
+            rendition.display(cfi);
+        });
+
+        // 5. FECHAR O LIVRO E VOLTAR
+        function closeBook() {
+            readerView.style.display = 'none';
+            libraryView.style.display = 'flex';
+            document.removeEventListener('keyup', handleKeyboard);
+        }
+
+        // Navegação por teclado
+        function handleKeyboard(e) {
+            if (rendition) {
+                if (e.key === 'ArrowLeft') rendition.prev();
+                if (e.key === 'ArrowRight') rendition.next();
+            }
+        }
+    </script>
+</body>
+</html>
