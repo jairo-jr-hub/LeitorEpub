@@ -8,10 +8,11 @@ const tocModal = document.getElementById('toc-modal');
 let currentBook = null;
 let rendition = null;
 
+// Configurações persistentes inspiradas no Play Livros
 let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
     fontSize: 100,
-    fontFamily: "'Literata', serif", 
-    theme: 'sepia', 
+    fontFamily: "'Literata', serif", // Começa com a fonte nativa do Play Livros
+    theme: 'sepia', // Começa no Sépia quente nativo
     brightness: 100
 };
 
@@ -20,13 +21,14 @@ document.addEventListener('DOMContentLoaded', () => {
     initUIEvents();
 });
 
+// --- FUNÇÃO GLOBAL PARA FECHAR MENUS ---
 function fecharMenus() {
     readerView.classList.add('ui-hidden');
     settingsModal.classList.add('hidden');
     tocModal.classList.add('hidden');
 }
 
-// --- BIBLIOTECA ---
+// --- BIBLIOTECA (IndexedDB via LocalForage) ---
 async function loadLibrary() {
     bookshelf.innerHTML = '';
     const library = await localforage.getItem('library_metadata') || [];
@@ -43,7 +45,7 @@ async function loadLibrary() {
 
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
-        deleteBtn.innerHTML = '✕'; 
+        deleteBtn.innerHTML = '✕'; // Ícone ✕ para excluir
         deleteBtn.onclick = async (e) => {
             e.stopPropagation();
             if (confirm(`Excluir permanentemente o livro "${bookMeta.title}" do leitor?`)) {
@@ -69,6 +71,7 @@ async function loadLibrary() {
     });
 }
 
+// Upload de Livros
 fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -104,11 +107,11 @@ fileInput.addEventListener('change', async (e) => {
     }
 });
 
-// --- RENDERIZAÇÃO DO LIVRO ---
+// --- RENDERIZAÇÃO DO LIVRO (EPUB.js) ---
 async function openBook(bookId) {
     libraryView.style.display = 'none';
     readerView.style.display = 'block';
-    fecharMenus(); 
+    fecharMenus(); // Garante que tudo comece fechado
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
@@ -122,8 +125,12 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
+        // Configuração dos Temas Nativos (Hexadecimais exatos do Play Livros extraídos via conta-gotas)
         rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
-        rendition.themes.register("sepia", { "body": { "background": "#f9f1e2 !important", "color": "#3e2a1e !important" }});
+        
+        // CORREÇÃO: Usando a cor de fonte exata do Play Livros (#322114) no fundo creme exato (#f9f1e2)
+        rendition.themes.register("sepia", { "body": { "background": "#f9f1e2 !important", "color": "#322114 !important" }});
+        
         rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
         
         rendition.themes.select(readerSettings.theme);
@@ -131,6 +138,7 @@ async function openBook(bookId) {
         
         if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
 
+        // Hook crítico para injetar estilos de formatação e nitidez
         rendition.hooks.content.register((contents) => {
             atualizarStylesInjetados(); 
         });
@@ -146,6 +154,7 @@ async function openBook(bookId) {
             await rendition.display();
         }
 
+        // Sumário
         currentBook.loaded.navigation.then(nav => {
             const tocList = document.getElementById('toc-list');
             tocList.innerHTML = '';
@@ -244,7 +253,8 @@ function initUIEvents() {
 
     document.querySelectorAll('.font-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            readerSettings.fontFamily = e.currentTarget.dataset.font;
+            const fontBtn = e.currentTarget;
+            readerSettings.fontFamily = fontBtn.dataset.font;
             aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig();
         });
     });
@@ -272,8 +282,9 @@ function aplicarConfiguracoesDinamicas() {
     
     rendition.themes.select(readerSettings.theme);
     
+    // Matriz de cores exata garantida globalmente
     const bgColors = { 'light': '#ffffff', 'sepia': '#f9f1e2', 'dark': '#121212' };
-    const textColors = { 'light': '#000000', 'sepia': '#3e2a1e', 'dark': '#e0e0e0' };
+    const textColors = { 'light': '#000000', 'sepia': '#322114', 'dark': '#e0e0e0' };
     const currentBgColor = bgColors[readerSettings.theme];
     
     readerView.style.background = currentBgColor;
@@ -291,26 +302,29 @@ function aplicarConfiguracoesDinamicas() {
     }
 
     rendition.themes.fontSize(readerSettings.fontSize + "%");
-    atualizarStylesInjetados();
+    atualizarStylesInjetados(); // Chama a injeção bruta para atualizar a cor da fonte forçada
     aplicarBrilho();
 }
 
-// O motor de correção científica para forçar a Fonte Variável a ficar fina e limpa no iPhone
+// O motor de injeção bruta para formatação nítida e esmagar o CSS do EPUB
 function atualizarStylesInjetados() {
     if (!rendition) return;
     
-    const textColors = { 'light': '#000000', 'sepia': '#3e2a1e', 'dark': '#e0e0e0' };
+    // Matriz de cores exata para esmagamento
+    const textColors = { 'light': '#000000', 'sepia': '#322114', 'dark': '#e0e0e0' };
     const currentColor = textColors[readerSettings.theme];
+    const isDark = readerSettings.theme === 'dark';
     
     const isLiterata = readerSettings.fontFamily.includes('Literata');
     const fontToApply = readerSettings.fontFamily !== 'Original' ? `font-family: ${readerSettings.fontFamily} !important;` : '';
     
-    // As variáveis exatas usadas pelo Google para impedir o falso negrito no iOS
+    // As variáveis exatas usadas pelo Google para impedir o falso negrito e garantir nitidez
     const literataFixNorm = isLiterata ? 'font-variation-settings: "opsz" 14, "wght" 400 !important;' : '';
     const literataFixBold = isLiterata ? 'font-variation-settings: "opsz" 14, "wght" 700 !important;' : '';
 
     try {
         rendition.getContents().forEach(content => {
+            // 1. INJETA A FONTE DO GOOGLE DIRETO NO IFRAME DO LIVRO (Mágica da nitidez)
             if (!content.document.getElementById('literata-font-import')) {
                 const fontLink = content.document.createElement('link');
                 fontLink.id = 'literata-font-import';
@@ -319,6 +333,7 @@ function atualizarStylesInjetados() {
                 content.document.head.appendChild(fontLink);
             }
 
+            // 2. ESMAGA AS REGRAS DO EPUB ORIGINAL (Estilos pesados)
             let style = content.document.getElementById('epub-dynamic-styles');
             if (!style) {
                 style = content.document.createElement('style');
@@ -336,9 +351,18 @@ function atualizarStylesInjetados() {
                     text-rendering: optimizeLegibility !important;
                 }
                 
-                body, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
+                /* Esmaga globalmente para a cor exata (#322114 no sépia) */
+                body, p, span, div, li, a {
                     color: ${currentColor} !important;
                     ${fontToApply}
+                }
+
+                /* Garante títulos em negrito real e na cor exata */
+                h1, h2, h3, h4, h5, h6 {
+                    font-weight: 700 !important;
+                    color: ${currentColor} !important;
+                    ${fontToApply}
+                    ${literataFixBold}
                 }
                 
                 /* Força o parágrafo normal a ficar na espessura 400 exata */
@@ -347,9 +371,23 @@ function atualizarStylesInjetados() {
                     ${literataFixNorm}
                 }
                 
-                /* Preserva títulos e negritos na espessura correta */
-                b, strong, h1, h2, h3, h4, h5, h6 {
+                /* Preserva negritos internos na espessura 700 */
+                b, strong {
                     font-weight: 700 !important;
+                    color: ${currentColor} !important;
+                    ${literataFixBold}
+                }
+
+                /* CORREÇÃO DO INÍCIO DO CAPÍTULO: Negrito + Small Caps exato do Play Livros */
+                /* Detecta o primeiro parágrafo verdadeiro do capítulo e aplica o estilo pesado */
+                #viewer p:first-of-type,
+                .viewer p:first-of-type,
+                body > p:first-of-type {
+                    font-weight: 700 !important;
+                    font-variant: small-caps !important;
+                    text-transform: lowercase !important; /* Ajuda o small-caps a ficar correto */
+                    letter-spacing: 0.5px !important; /* Dá um respiro elegante */
+                    color: ${currentColor} !important;
                     ${literataFixBold}
                 }
             `;
