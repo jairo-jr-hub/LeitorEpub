@@ -123,8 +123,10 @@ async function openBook(bookId) {
         });
 
         rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
-        // Atualizado para o creme do Play Livros
-        rendition.themes.register("sepia", { "body": { "background": "#faf6ee !important", "color": "#26180f !important" }});
+        
+        // CORES EXATAS DO PLAY LIVROS GARANTIDAS
+        rendition.themes.register("sepia", { "body": { "background": "#f6eeda !important", "color": "#3b2c1e !important" }});
+        
         rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
         
         rendition.themes.select(readerSettings.theme);
@@ -135,7 +137,7 @@ async function openBook(bookId) {
         rendition.hooks.content.register((contents) => {
             const style = contents.document.createElement('style');
             style.id = 'epub-dynamic-styles';
-            // CSS Atualizado com antialiasing para nitidez extrema
+            // Regras de nitidez e margin inferior
             style.innerHTML = `
                 body {
                     padding: calc(40px + env(safe-area-inset-top)) 20px calc(80px + env(safe-area-inset-bottom)) 20px !important; 
@@ -294,9 +296,9 @@ function aplicarConfiguracoesDinamicas() {
     
     rendition.themes.select(readerSettings.theme);
     
-    // Atualizado com o Creme #faf6ee
-    const bgColors = { 'light': '#ffffff', 'sepia': '#faf6ee', 'dark': '#121212' };
-    const textColors = { 'light': '#000000', 'sepia': '#26180f', 'dark': '#e0e0e0' };
+    // MATRIZ DE CORES SINCRONIZADAS GARANTIDAS
+    const bgColors = { 'light': '#ffffff', 'sepia': '#f6eeda', 'dark': '#121212' };
+    const textColors = { 'light': '#000000', 'sepia': '#3b2c1e', 'dark': '#e0e0e0' };
     const currentBgColor = bgColors[readerSettings.theme];
     
     readerView.style.background = currentBgColor;
