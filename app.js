@@ -18,17 +18,19 @@ const DOM = {
 let book = null;
 let rendition = null;
 let currentBookId = null;
-let currentLocationCfi = null; 
 
-// V2 CONFIGS: Adicionado o "paddingY" para controlar o respiro interno do leitor
-let settings = JSON.parse(localStorage.getItem('reader_v2_configs')) || {
+// O SEGREDO DA V3: Rastreia a porcentagem matemática absoluta, não CFIs frágeis.
+let currentPercentage = 0; 
+let totalPages = 1;
+
+let settings = JSON.parse(localStorage.getItem('reader_v3_configs')) || {
     font: "'Literata', serif",
     size: 100,
     lineHeight: 1.5,
     align: "justify",
     theme: "sepia",
     brightness: 100,
-    paddingY: 60 // Respiro padrão configurável
+    paddingY: 60
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -37,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ==========================================
-// 1. BIBLIOTECA (CARREGAMENTO E UPLOAD)
+// 1. BIBLIOTECA
 // ==========================================
 async function carregarBiblioteca() {
     DOM.bookshelf.innerHTML = '';
@@ -60,7 +62,7 @@ async function carregarBiblioteca() {
             e.stopPropagation();
             if (confirm(`Excluir "${bookMeta.title}" do aplicativo?`)) {
                 await localforage.removeItem(bookMeta.id); 
-                localStorage.removeItem('cfi_' + bookMeta.id); 
+                localStorage.removeItem('pct_' + bookMeta.id); // V3 usa pct_
                 const nova = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', nova); 
                 carregarBiblioteca();
@@ -111,7 +113,8 @@ DOM.fileInput.addEventListener('change', async (e) => {
         await localforage.setItem(bookId, arrayBuffer);
         
         const library = await localforage.getItem('library_metadata') || [];
-        library.push({ id: bookId, title: metadata.title || "Livro Desconhecido", cover: coverBase64 });
+        // V3 salva 'pct' em vez de 'cfi'
+        library.push({ id: bookId, title: metadata.title || "Livro Desconhecido", cover: coverBase64, pct: 0 });
         await localforage.setItem('library_metadata', library);
         
         tempBook.destroy();
@@ -127,15 +130,15 @@ DOM.fileInput.addEventListener('change', async (e) => {
 });
 
 // ==========================================
-// 2. MOTOR DE LEITURA E SALVAMENTO
+// 2. MOTOR DE LEITURA (V3 - LÓGICA DE PÁGINAS)
 // ==========================================
 async function abrirLivro(bookId) {
     currentBookId = bookId;
-    currentLocationCfi = null;
+    currentPercentage = 0;
     DOM.library.classList.add('hidden');
     DOM.reader.classList.remove('hidden');
     esconderMenus();
-    DOM.progressLabel.textContent = "Calculando...";
+    DOM.progressLabel.textContent = "Paginando...";
 
     try {
         const arrayBuffer = await localforage.getItem(bookId);
@@ -163,35 +166,35 @@ async function abrirLivro(bookId) {
         });
 
         aplicarEstilosNoMotor();
+        gerarSumario();
         
-        let cfiSalvo = localStorage.getItem('cfi_' + bookId);
-        if (!cfiSalvo) {
+        // 1. Busca a Porcentagem Salva
+        let pctSalvo = localStorage.getItem('pct_' + bookId);
+        if (!pctSalvo) {
             const library = await localforage.getItem('library_metadata');
             const bookMeta = library.find(b => b.id === bookId);
-            if (bookMeta && bookMeta.cfi) cfiSalvo = bookMeta.cfi;
+            if (bookMeta && bookMeta.pct) pctSalvo = bookMeta.pct;
         }
         
-        try {
-            if (cfiSalvo) await rendition.display(cfiSalvo);
-            else await rendition.display();
-            currentLocationCfi = rendition.location ? rendition.location.start.cfi : cfiSalvo;
-        } catch(e) {
-            await rendition.display();
-            currentLocationCfi = rendition.location ? rendition.location.start.cfi : null;
-        }
+        // 2. Transforma o valor salvo em float
+        currentPercentage = pctSalvo ? parseFloat(pctSalvo) : 0;
 
-        book.locations.generate(1600).then(() => {
-            atualizarProgresso(currentLocationCfi);
-        });
-        gerarSumario();
+        // 3. Renderiza o livro (inicial para destrancar o motor)
+        await rendition.display();
+        
+        // 4. Mágica da V3: Calcula as páginas de verdade baseado no tamanho da letra
+        await gerarPaginas(currentPercentage);
 
+        // 5. Evento de Virada de Página: Salva a % real
         rendition.on('relocated', (location) => {
             DOM.btnBookmark.classList.remove('saved');
             DOM.btnBookmark.textContent = '📍';
             if (location && location.start) {
-                currentLocationCfi = location.start.cfi;
-                atualizarProgresso(currentLocationCfi);
-                localStorage.setItem('cfi_' + currentBookId, currentLocationCfi); // Auto-Save
+                // Descobre matematicamente onde estamos e atualiza a UI de "Página X de Y"
+                atualizarProgresso(location.start.cfi);
+                
+                // Grava a Porcentagem na memória rápida
+                localStorage.setItem('pct_' + currentBookId, currentPercentage);
             }
         });
 
@@ -201,58 +204,79 @@ async function abrirLivro(bookId) {
     }
 }
 
-// SALVAMENTO MANUAL ABSOLUTO (SEM ERRO)
-DOM.btnBookmark.addEventListener('click', async () => {
-    const localizacaoReal = rendition.currentLocation() ? rendition.currentLocation().start.cfi : currentLocationCfi;
+// GERA AS PÁGINAS DEPENDENDO DO ZOOM
+async function gerarPaginas(porcentagemDestino) {
+    DOM.progressLabel.textContent = "Paginando...";
+    
+    // O pulo do gato: Se a letra for grande (200%), usamos menos caracteres por página gerada.
+    // Isso cria mais páginas no total, imitando perfeitamente o comportamento físico.
+    const caracteresBasePorPagina = Math.round(1200 * (100 / settings.size));
+    
+    await book.locations.generate(caracteresBasePorPagina);
+    totalPages = book.locations.length || 1;
+    
+    if (porcentagemDestino !== null && porcentagemDestino > 0) {
+        // Encontra o CFI exato referente àquela porcentagem nas novas dimensões
+        const targetCfi = book.locations.cfiFromPercentage(porcentagemDestino);
+        if (targetCfi) {
+            await rendition.display(targetCfi);
+        }
+    }
+    
+    // Atualiza os números no rodapé
+    if (rendition.location && rendition.location.start) {
+        atualizarProgresso(rendition.location.start.cfi);
+    } else {
+        DOM.progressLabel.textContent = `Pág. 1 de ${totalPages}`;
+    }
+}
 
-    if (localizacaoReal && currentBookId) {
-        localStorage.setItem('cfi_' + currentBookId, localizacaoReal);
-        currentLocationCfi = localizacaoReal;
+// ==========================================
+// SALVAMENTO MANUAL ABSOLUTO V3
+// ==========================================
+DOM.btnBookmark.addEventListener('click', async () => {
+    if (currentBookId) {
+        // Salva na memória rápida
+        localStorage.setItem('pct_' + currentBookId, currentPercentage);
         
+        // Salva no banco de dados raiz
         const library = await localforage.getItem('library_metadata');
         if (library) {
             const bookIndex = library.findIndex(b => b.id === currentBookId);
             if (bookIndex !== -1) {
-                library[bookIndex].cfi = localizacaoReal;
+                library[bookIndex].pct = currentPercentage;
                 await localforage.setItem('library_metadata', library);
             }
         }
 
         DOM.btnBookmark.classList.add('saved');
         DOM.btnBookmark.textContent = '✔ Salvo';
-        atualizarProgresso(localizacaoReal);
-    } else {
-        alert("Erro ao ler posição. Aguarde um segundo e tente novamente.");
     }
 });
 
 // Auto-Save de emergência do iOS
 document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState === 'hidden' && currentBookId) {
-        const localizacaoReal = rendition.currentLocation() ? rendition.currentLocation().start.cfi : currentLocationCfi;
-        if (localizacaoReal) {
-            localStorage.setItem('cfi_' + currentBookId, localizacaoReal);
-            const library = await localforage.getItem('library_metadata');
-            if (library) {
-                const bookIndex = library.findIndex(b => b.id === currentBookId);
-                if (bookIndex !== -1) {
-                    library[bookIndex].cfi = localizacaoReal;
-                    localforage.setItem('library_metadata', library);
-                }
+        localStorage.setItem('pct_' + currentBookId, currentPercentage);
+        const library = await localforage.getItem('library_metadata');
+        if (library) {
+            const bookIndex = library.findIndex(b => b.id === currentBookId);
+            if (bookIndex !== -1) {
+                library[bookIndex].pct = currentPercentage;
+                localforage.setItem('library_metadata', library);
             }
         }
     }
 });
 
 async function fecharLivro() {
-    const localizacaoReal = rendition.currentLocation() ? rendition.currentLocation().start.cfi : currentLocationCfi;
-    if (localizacaoReal && currentBookId) {
-        localStorage.setItem('cfi_' + currentBookId, localizacaoReal);
+    if (currentBookId) {
+        localStorage.setItem('pct_' + currentBookId, currentPercentage);
         const library = await localforage.getItem('library_metadata');
         if (library) {
             const bookIndex = library.findIndex(b => b.id === currentBookId);
             if (bookIndex !== -1) {
-                library[bookIndex].cfi = localizacaoReal;
+                library[bookIndex].pct = currentPercentage;
                 await localforage.setItem('library_metadata', library);
             }
         }
@@ -261,7 +285,7 @@ async function fecharLivro() {
     if (book) { book.destroy(); book = null; rendition = null; }
     document.getElementById('viewer').innerHTML = '';
     currentBookId = null;
-    currentLocationCfi = null;
+    currentPercentage = 0;
     
     DOM.reader.classList.add('hidden');
     DOM.library.classList.remove('hidden');
@@ -270,7 +294,7 @@ async function fecharLivro() {
 }
 
 // ==========================================
-// 3. NAVEGAÇÃO
+// 3. NAVEGAÇÃO E ATUALIZAÇÃO DA PÁGINA X DE Y
 // ==========================================
 function gerarSumario() {
     book.loaded.navigation.then(nav => {
@@ -306,9 +330,13 @@ function gerarSumario() {
 function atualizarProgresso(cfi) {
     if (book && book.locations.length > 0 && cfi) {
         const percent = book.locations.percentageFromCfi(cfi);
-        const valor = Math.round(percent * 100);
-        DOM.progressSlider.value = valor;
-        DOM.progressLabel.textContent = `${valor}%`;
+        currentPercentage = percent; // Trava o rastreador
+        
+        // Matemática para saber a Página Física com base no array calculado
+        const currentPage = Math.max(1, Math.round(percent * totalPages));
+        
+        DOM.progressSlider.value = Math.round(percent * 100);
+        DOM.progressLabel.textContent = `Pág. ${currentPage} de ${totalPages}`;
     }
 }
 
@@ -321,31 +349,19 @@ DOM.progressSlider.addEventListener('change', (e) => {
 });
 
 // ==========================================
-// 4. MOTOR DE ESTILIZAÇÃO E UI
+// 4. MOTOR DE ESTILIZAÇÃO
 // ==========================================
 
-// Função MESTRA da V2: Trava a página (CFI) -> Aplica o visual -> Devolve você para a mesma página
 async function alterarConfiguracaoLayout(callback) {
-    const cfiAtual = rendition.currentLocation() ? rendition.currentLocation().start.cfi : currentLocationCfi;
+    const pctAtual = currentPercentage; // Salva a posição relativa antes de mexer
     
-    callback(); // Altera os valores do settings
+    callback(); // Altera os values (zoom, respiro, etc)
     
     carregarUIConfigs();
-    salvarConfigs(); // Aplica no motor
+    salvarConfigs(); // Injeta o CSS
     
-    // Força o motor a repaginar mantendo a palavra exata na tela
-    if (cfiAtual && rendition) {
-        await rendition.display(cfiAtual);
-        
-        // Recalcula o slider de páginas em background com o novo estilo
-        setTimeout(() => {
-            if (book.locations.length > 0) {
-                book.locations.generate(1600).then(() => {
-                    atualizarProgresso(cfiAtual);
-                });
-            }
-        }, 100);
-    }
+    // Repagina o livro inteiro e pula pra posição de volta
+    await gerarPaginas(pctAtual);
 }
 
 function aplicarEstilosNoMotor() {
@@ -370,7 +386,6 @@ function aplicarEstilosNoMotor() {
 
     rendition.themes.fontSize(`${settings.size}%`);
 
-    // Injeção com a variável de paddingY (O Respiro) ajustável pelo usuário
     rendition.themes.default({
         "body": {
             "font-family": settings.font === 'Original' ? "inherit !important" : `${settings.font} !important`,
@@ -395,7 +410,7 @@ function aplicarEstilosNoMotor() {
 }
 
 function salvarConfigs() {
-    localStorage.setItem('reader_v2_configs', JSON.stringify(settings));
+    localStorage.setItem('reader_v3_configs', JSON.stringify(settings));
     aplicarEstilosNoMotor();
 }
 
@@ -451,7 +466,7 @@ DOM.btnOpenToc.addEventListener('click', () => {
     DOM.tocModal.classList.toggle('hidden');
 });
 
-// Abas de Configuração
+// Abas
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -461,7 +476,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
-// Ações dos Controles usando a Mágica da V2 (alterarConfiguracaoLayout)
+// Ações dos Controles com V3 Trava de Layout (Recalcula as Páginas)
 document.querySelectorAll('.font-btn').forEach(btn => { 
     btn.addEventListener('click', (e) => { 
         alterarConfiguracaoLayout(() => { settings.font = e.currentTarget.dataset.font; }); 
@@ -483,7 +498,7 @@ document.getElementById('select-align').addEventListener('change', (e) => {
     alterarConfiguracaoLayout(() => { settings.align = e.target.value; }); 
 });
 
-// Controle de Respiro (NOVO)
+// Controle de Respiro
 document.getElementById('btn-margin-y-minus').addEventListener('click', () => { 
     alterarConfiguracaoLayout(() => { if (settings.paddingY > 0) settings.paddingY -= 10; }); 
 });
@@ -491,7 +506,7 @@ document.getElementById('btn-margin-y-plus').addEventListener('click', () => {
     alterarConfiguracaoLayout(() => { if (settings.paddingY < 150) settings.paddingY += 10; }); 
 });
 
-// Controles Visuais (Não mexem no layout do texto, então só salvam direto)
+// Brilho e Cores (Não repaginam, apenas mudam visual)
 document.getElementById('brightness-slider').addEventListener('input', (e) => { 
     settings.brightness = e.target.value; 
     salvarConfigs(); 
