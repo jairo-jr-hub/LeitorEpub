@@ -8,6 +8,7 @@ const tocModal = document.getElementById('toc-modal');
 let currentBook = null;
 let rendition = null;
 
+// Configurações persistentes com Literata como padrão absoluto
 let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
     fontSize: 100,
     fontFamily: "'Literata', serif", 
@@ -122,39 +123,9 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
-        rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
-        
-        // CORES EXATAS DO PLAY LIVROS GARANTIDAS
-        rendition.themes.register("sepia", { "body": { "background": "#f6eeda !important", "color": "#3b2c1e !important" }});
-        
-        rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
-        
-        rendition.themes.select(readerSettings.theme);
-        rendition.themes.fontSize(readerSettings.fontSize + "%");
-        
-        if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
-
+        // Este hook agora faz a injeção bruta do Google Fonts DENTRO do livro
         rendition.hooks.content.register((contents) => {
-            const style = contents.document.createElement('style');
-            style.id = 'epub-dynamic-styles';
-            // Regras de nitidez e margin inferior
-            style.innerHTML = `
-                body {
-                    padding: calc(40px + env(safe-area-inset-top)) 20px calc(80px + env(safe-area-inset-bottom)) 20px !important; 
-                    margin: 0 !important; 
-                    background-color: transparent !important;
-                    -webkit-font-smoothing: antialiased !important;
-                    -moz-osx-font-smoothing: grayscale !important;
-                    text-rendering: optimizeLegibility !important;
-                }
-                body > p:first-of-type::first-line,
-                body > div > p:first-of-type::first-line,
-                section > p:first-of-type::first-line,
-                div[role="main"] > p:first-of-type::first-line {
-                    font-weight: 700 !important;
-                }
-            `;
-            contents.document.head.appendChild(style);
+            atualizarStylesInjetados(); // Chama a função de força bruta
         });
 
         aplicarConfiguracoesDinamicas();
@@ -267,8 +238,7 @@ function initUIEvents() {
 
     document.querySelectorAll('.font-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            const fontBtn = e.currentTarget;
-            readerSettings.fontFamily = fontBtn.dataset.font;
+            readerSettings.fontFamily = e.currentTarget.dataset.font;
             aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig();
         });
     });
@@ -294,9 +264,6 @@ function salvarConfig() { localStorage.setItem('reader_settings', JSON.stringify
 function aplicarConfiguracoesDinamicas() {
     if (!rendition) return;
     
-    rendition.themes.select(readerSettings.theme);
-    
-    // MATRIZ DE CORES SINCRONIZADAS GARANTIDAS
     const bgColors = { 'light': '#ffffff', 'sepia': '#f6eeda', 'dark': '#121212' };
     const textColors = { 'light': '#000000', 'sepia': '#3b2c1e', 'dark': '#e0e0e0' };
     const currentBgColor = bgColors[readerSettings.theme];
@@ -315,14 +282,57 @@ function aplicarConfiguracoesDinamicas() {
         themeColorMeta.setAttribute('content', currentBgColor);
     }
 
+    // Aplica globalmente na biblioteca e chama a injeção pesada
     rendition.themes.fontSize(readerSettings.fontSize + "%");
-    if(readerSettings.fontFamily !== 'Original') {
-        rendition.themes.font(readerSettings.fontFamily);
-    } else {
-        rendition.themes.font(''); 
-    }
-
+    atualizarStylesInjetados();
     aplicarBrilho();
+}
+
+// --- O MOTOR DE FORÇA BRUTA (A MÁGICA ACONTECE AQUI) ---
+function atualizarStylesInjetados() {
+    if (!rendition) return;
+    
+    const textColors = { 'light': '#000000', 'sepia': '#3b2c1e', 'dark': '#e0e0e0' };
+    const currentColor = textColors[readerSettings.theme];
+    const fontToApply = readerSettings.fontFamily !== 'Original' ? `font-family: ${readerSettings.fontFamily} !important;` : '';
+
+    try {
+        rendition.getContents().forEach(content => {
+            // 1. INJETA A FONTE DO GOOGLE DIRETO NO IFRAME DO LIVRO
+            if (!content.document.getElementById('literata-font-import')) {
+                const fontLink = content.document.createElement('link');
+                fontLink.id = 'literata-font-import';
+                fontLink.rel = 'stylesheet';
+                fontLink.href = 'https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap';
+                content.document.head.appendChild(fontLink);
+            }
+
+            // 2. ESMAGA AS CORES E FONTES DO EPUB ORIGINAL
+            let style = content.document.getElementById('epub-dynamic-styles');
+            if (!style) {
+                style = content.document.createElement('style');
+                style.id = 'epub-dynamic-styles';
+                content.document.head.appendChild(style);
+            }
+
+            style.innerHTML = `
+                body {
+                    padding: calc(40px + env(safe-area-inset-top)) 20px calc(80px + env(safe-area-inset-bottom)) 20px !important; 
+                    margin: 0 !important; 
+                    background-color: transparent !important;
+                    -webkit-font-smoothing: antialiased !important;
+                    -moz-osx-font-smoothing: grayscale !important;
+                    text-rendering: optimizeLegibility !important;
+                }
+                
+                /* Esmaga a cor de títulos, textos fracos, links e parágrafos */
+                body, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
+                    color: ${currentColor} !important;
+                    ${fontToApply}
+                }
+            `;
+        });
+    } catch(e) { console.warn("Erro ao injetar estilos pesados", e); }
 }
 
 function aplicarBrilho() {
