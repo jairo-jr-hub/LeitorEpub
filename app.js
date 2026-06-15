@@ -7,16 +7,12 @@ const settingsModal = document.getElementById('settings-modal');
 let currentBook = null;
 let rendition = null;
 
-// Novo Estado com Margens e Espaçamento entre Palavras
+// Configurações persistentes com o tema Sépia ativo por padrão
 let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
     fontSize: 100,
     fontFamily: 'Original',
-    lineHeight: 1.5,
-    wordSpacing: 0,
-    textAlign: 'justify',
     theme: 'sepia', 
-    brightness: 100,
-    margins: { top: 40, right: 20, bottom: 40, left: 20 }
+    brightness: 100
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -24,25 +20,28 @@ document.addEventListener('DOMContentLoaded', () => {
     initUIEvents();
 });
 
-// --- BIBLIOTECA ---
+// --- BIBLIOTECA (IndexedDB via LocalForage) ---
 async function loadLibrary() {
     bookshelf.innerHTML = '';
     const library = await localforage.getItem('library_metadata') || [];
+    
     if (library.length === 0) {
         bookshelf.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #666; margin-top: 20px;">Nenhum livro salvo. Adicione um arquivo EPUB.</p>';
         return;
     }
+
     library.forEach(bookMeta => {
         const div = document.createElement('div');
         div.className = 'book-item';
         div.onclick = () => openBook(bookMeta.id);
 
+        // Botão de excluir dinâmico (Três pontinhos)
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
         deleteBtn.innerHTML = '⋮';
         deleteBtn.onclick = async (e) => {
-            e.stopPropagation();
-            if (confirm(`Excluir permanentemente "${bookMeta.title}"?`)) {
+            e.stopPropagation(); // Impede de abrir o livro ao tentar deletar
+            if (confirm(`Excluir permanentemente o livro "${bookMeta.title}" do leitor?`)) {
                 await localforage.removeItem(bookMeta.id);
                 const novaBiblioteca = library.filter(b => b.id !== bookMeta.id);
                 await localforage.setItem('library_metadata', novaBiblioteca);
@@ -68,7 +67,9 @@ async function loadLibrary() {
 fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
     document.querySelector('.upload-btn').childNodes[0].textContent = "Processando...";
+
     try {
         const arrayBuffer = await file.arrayBuffer();
         const bookData = ePub(arrayBuffer);
@@ -97,17 +98,20 @@ fileInput.addEventListener('change', async (e) => {
         await localforage.setItem('library_metadata', library);
 
         await loadLibrary();
-    } catch (error) { alert("Erro ao processar o arquivo."); } 
-    finally {
+    } catch (error) {
+        alert("Erro ao processar o arquivo.");
+    } finally {
         document.querySelector('.upload-btn').childNodes[0].textContent = "Adicionar EPUB";
         fileInput.value = '';
     }
 });
 
-// --- EXECUÇÃO DO LEITOR ---
+// --- EXECUÇÃO DO LEITOR (Injeções Estáveis e Filtragem de Notch/Dynamic Island) ---
 async function openBook(bookId) {
     libraryView.style.display = 'none';
     readerView.style.display = 'block';
+    
+    // Inicia no modo tela cheia puro
     readerView.classList.add('ui-hidden');
     settingsModal.classList.add('hidden');
 
@@ -123,6 +127,7 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
+        // Configuração dos Temas com injeção prioritária (!important)
         rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
         rendition.themes.register("sepia", { "body": { "background": "#fdfaf6 !important", "color": "#4b3d32 !important" }});
         rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
@@ -131,9 +136,21 @@ async function openBook(bookId) {
         rendition.themes.fontSize(readerSettings.fontSize + "%");
         if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
 
+        // Injeção de Estilos Dinâmicos respeitando as margens e a safe-area do iPhone
         rendition.hooks.content.register((contents) => {
             const style = contents.document.createElement('style');
             style.id = 'epub-dynamic-styles';
+            // Injeta padding de área segura e fixa o texto como Justificado
+            style.innerHTML = `
+                body {
+                    padding: calc(20px + env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom)) 20px !important; 
+                    margin: 0 !important; 
+                    background-color: transparent !important;
+                }
+                body, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
+                    text-align: justify !important; /* Sempre justificado, como solicitado */
+                }
+            `;
             contents.document.head.appendChild(style);
         });
 
@@ -142,13 +159,17 @@ async function openBook(bookId) {
         const library = await localforage.getItem('library_metadata');
         const bookMeta = library.find(b => b.id === bookId);
         
+        // Exibe o livro sem travar a thread principal
         if (bookMeta && bookMeta.cfi) {
             try { await rendition.display(bookMeta.cfi); } catch(e) { await rendition.display(); }
         } else {
             await rendition.display();
         }
 
-        currentBook.ready.then(() => { return currentBook.locations.generate(1600); }).then(() => {
+        // Paginação gerada de forma assíncrona em segundo plano (Previne tela branca)
+        currentBook.ready.then(() => {
+            return currentBook.locations.generate(1600);
+        }).then(() => {
             if(rendition.location) {
                 const percentage = currentBook.locations.percentageFromCfi(rendition.location.start.cfi);
                 const percentRounded = Math.round(percentage * 100);
@@ -160,6 +181,7 @@ async function openBook(bookId) {
         rendition.on('relocated', async (location) => {
             bookMeta.cfi = location.start.cfi;
             await localforage.setItem('library_metadata', library);
+            
             if(currentBook.locations.length > 0) {
                 const percentage = currentBook.locations.percentageFromCfi(location.start.cfi);
                 const percentRounded = Math.round(percentage * 100);
@@ -179,16 +201,21 @@ function fecharLivro() {
     document.getElementById('viewer').innerHTML = '';
     readerView.style.display = 'none';
     libraryView.style.display = 'block';
+    
+    // Reseta a cor de status bar para o padrão claro ao sair do leitor
     const meta = document.getElementById('theme-color-meta');
     if (meta) meta.setAttribute('content', '#ffffff');
 }
 
-// --- INTERAÇÕES DA UI ---
+// --- INTERAÇÕES VISUAIS DA INTERFACE ---
 function initUIEvents() {
+    // Ações das Zonas de Toque Laterais e Central
     document.getElementById('zone-left').addEventListener('click', () => { if (rendition) rendition.prev(); fecharMenus(); });
     document.getElementById('zone-right').addEventListener('click', () => { if (rendition) rendition.next(); fecharMenus(); });
+    
     document.getElementById('zone-center').addEventListener('click', () => {
-        if (readerView.classList.contains('ui-hidden')) { readerView.classList.remove('ui-hidden'); } 
+        const isHidden = readerView.classList.contains('ui-hidden');
+        if (isHidden) { readerView.classList.remove('ui-hidden'); } 
         else { fecharMenus(); }
     });
 
@@ -200,14 +227,17 @@ function initUIEvents() {
         settingsModal.classList.add('hidden');
     }
 
+    // Gerenciador de Abas do Menu Flutuante
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.tab-btn, .tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             e.target.classList.add('active');
             document.getElementById(`tab-${e.target.dataset.tab}`).classList.add('active');
         });
     });
 
+    // Alteração de Tipografia
     document.querySelectorAll('.font-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             readerSettings.fontFamily = e.currentTarget.dataset.font;
@@ -215,31 +245,16 @@ function initUIEvents() {
         });
     });
 
-    // Tamanho da Fonte
     document.getElementById('btn-font-plus').addEventListener('click', () => { readerSettings.fontSize += 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
     document.getElementById('btn-font-minus').addEventListener('click', () => { if(readerSettings.fontSize > 50) readerSettings.fontSize -= 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
 
-    // Espaçamento Entre Linhas
-    document.getElementById('btn-line-plus').addEventListener('click', () => { readerSettings.lineHeight += 0.1; atualizarStylesInjetados(); atualizarUI(); salvarConfig(); });
-    document.getElementById('btn-line-minus').addEventListener('click', () => { if(readerSettings.lineHeight > 1.0) readerSettings.lineHeight -= 0.1; atualizarStylesInjetados(); atualizarUI(); salvarConfig(); });
-
-    // Espaçamento Entre Palavras
-    document.getElementById('btn-word-plus').addEventListener('click', () => { readerSettings.wordSpacing += 1; atualizarStylesInjetados(); atualizarUI(); salvarConfig(); });
-    document.getElementById('btn-word-minus').addEventListener('click', () => { if(readerSettings.wordSpacing > 0) readerSettings.wordSpacing -= 1; atualizarStylesInjetados(); atualizarUI(); salvarConfig(); });
-
-    document.getElementById('text-align-select').addEventListener('change', (e) => { readerSettings.textAlign = e.target.value; atualizarStylesInjetados(); salvarConfig(); });
-
-    // Margens individuais
-    const directions = ['top', 'bottom', 'left', 'right'];
-    directions.forEach(dir => {
-        document.getElementById(`margin-${dir}`).addEventListener('input', (e) => {
-            readerSettings.margins[dir] = parseInt(e.target.value);
-            atualizarStylesInjetados(); salvarConfig();
-        });
-    });
-
+    // Alternador de Temas e Brilho
     document.querySelectorAll('.theme-color-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => { readerSettings.theme = e.target.dataset.theme; aplicarConfiguracoesDinamicas(); salvarConfig(); });
+        btn.addEventListener('click', (e) => {
+            readerSettings.theme = e.target.dataset.theme;
+            aplicarConfiguracoesDinamicas();
+            salvarConfig();
+        });
     });
 
     document.getElementById('brightness-slider').addEventListener('input', (e) => { readerSettings.brightness = e.target.value; aplicarBrilho(); salvarConfig(); });
@@ -247,55 +262,30 @@ function initUIEvents() {
     atualizarUI(); 
 }
 
-// --- ROTINAS DE INJEÇÃO CSS ---
+// --- ROTINAS REATIVAS (Aplicações em tempo de execução) ---
 function salvarConfig() { localStorage.setItem('reader_settings', JSON.stringify(readerSettings)); }
 
+// Função simplificada e robusta para atualizar a UI e o theme-color do navegador
 function aplicarConfiguracoesDinamicas() {
     if (!rendition) return;
+    
     rendition.themes.select(readerSettings.theme);
+    
+    // Camuflagem Inteligente do Relógio do iPhone
     const bgColors = { 'light': '#ffffff', 'sepia': '#fdfaf6', 'dark': '#121212' };
     const currentBgColor = bgColors[readerSettings.theme];
     
     readerView.style.background = currentBgColor;
+    
     const themeColorMeta = document.getElementById('theme-color-meta');
     if (themeColorMeta) themeColorMeta.setAttribute('content', currentBgColor);
 
+    // Fontes
     rendition.themes.fontSize(readerSettings.fontSize + "%");
     if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
     else rendition.themes.font(''); 
 
-    atualizarStylesInjetados();
     aplicarBrilho();
-}
-
-// Força Bruta para sobrepor o CSS Nativo do Livro
-function atualizarStylesInjetados() {
-    if (!rendition) return;
-    try {
-        rendition.getContents().forEach(content => {
-            let style = content.document.getElementById('epub-dynamic-styles');
-            if (!style) {
-                style = content.document.createElement('style');
-                style.id = 'epub-dynamic-styles';
-                content.document.head.appendChild(style);
-            }
-
-            const { top, right, bottom, left } = readerSettings.margins;
-
-            style.innerHTML = `
-                body {
-                    padding: calc(${top}px + env(safe-area-inset-top)) ${right}px calc(${bottom}px + env(safe-area-inset-bottom)) ${left}px !important; 
-                    margin: 0 !important; 
-                    background-color: transparent !important;
-                }
-                body, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
-                    line-height: ${readerSettings.lineHeight} !important;
-                    text-align: ${readerSettings.textAlign} !important;
-                    word-spacing: ${readerSettings.wordSpacing}px !important;
-                }
-            `;
-        });
-    } catch(e) { console.warn(e); }
 }
 
 function aplicarBrilho() {
@@ -305,22 +295,8 @@ function aplicarBrilho() {
 }
 
 function atualizarUI() {
-    // Sincroniza labels de texto
     document.getElementById('font-size-display').textContent = readerSettings.fontSize + '%';
-    document.getElementById('line-height-display').textContent = readerSettings.lineHeight.toFixed(1);
-    document.getElementById('word-space-display').textContent = readerSettings.wordSpacing + 'px';
-    document.getElementById('text-align-select').value = readerSettings.textAlign;
-    
-    // Sincroniza Margens
-    document.getElementById('margin-top').value = readerSettings.margins.top;
-    document.getElementById('margin-bottom').value = readerSettings.margins.bottom;
-    document.getElementById('margin-left').value = readerSettings.margins.left;
-    document.getElementById('margin-right').value = readerSettings.margins.right;
-
     document.getElementById('brightness-slider').value = readerSettings.brightness;
     aplicarBrilho();
-    
-    document.querySelectorAll('.font-btn').forEach(btn => { 
-        btn.classList.toggle('selected', btn.dataset.font === readerSettings.fontFamily); 
-    });
+    document.querySelectorAll('.font-btn').forEach(btn => { btn.classList.toggle('selected', btn.dataset.font === readerSettings.fontFamily); });
 }
