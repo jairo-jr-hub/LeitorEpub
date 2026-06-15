@@ -1,26 +1,101 @@
-* { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+* { 
+    box-sizing: border-box; 
+    margin: 0; 
+    padding: 0; 
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+}
 
-body { background-color: #f5f5f7; color: #1d1d1f; overflow: hidden; }
+body { 
+    background-color: #f5f5f7; 
+    color: #1d1d1f; 
+    overflow: hidden; 
+}
 
-/* Biblioteca */
-#library-view header { padding: 20px; background: #fff; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding-top: calc(15px + env(safe-area-inset-top)); }
-.upload-btn { background: #1a73e8; color: white; padding: 8px 16px; border-radius: 20px; font-weight: bold; cursor: pointer; }
-#bookshelf { padding: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 20px; height: calc(100vh - 80px); overflow-y: auto; }
-.book-item { background: #fff; border-radius: 8px; padding: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); cursor: pointer; text-align: center; position: relative; }
+/* --- Interface da Biblioteca --- */
+#library-view header { 
+    padding: 20px; 
+    background: #fff; 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+    padding-top: calc(15px + env(safe-area-inset-top)); /* Evita o relógio na biblioteca */
+}
 
-.delete-btn { position: absolute; top: 5px; right: 5px; background: rgba(255, 255, 255, 0.9); border: none; border-radius: 50%; width: 32px; height: 32px; font-size: 20px; font-weight: bold; color: #333; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2); z-index: 5; }
+.upload-btn { 
+    background: #1a73e8; 
+    color: white; 
+    padding: 8px 16px; 
+    border-radius: 20px; 
+    font-weight: bold; 
+    cursor: pointer; 
+}
+
+#bookshelf { 
+    padding: 20px; 
+    display: grid; 
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); 
+    gap: 20px; 
+    height: calc(100vh - 80px); 
+    overflow-y: auto; 
+}
+
+.book-item { 
+    background: #fff; 
+    border-radius: 8px; 
+    padding: 10px; 
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1); 
+    cursor: pointer; 
+    text-align: center; 
+    position: relative; 
+}
+
+.delete-btn {
+    position: absolute;
+    top: 5px; right: 5px;
+    background: rgba(255, 255, 255, 0.9);
+    border: none; border-radius: 50%;
+    width: 32px; height: 32px;
+    font-size: 20px; font-weight: bold; color: #333;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    z-index: 5;
+}
 .delete-btn:active { background: #e0e0e0; }
 
 .book-cover { width: 100%; height: 160px; object-fit: cover; border-radius: 4px; margin-bottom: 8px; }
 .book-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Leitor */
+/* --- Interface do Leitor Imersivo --- */
 #reader-view { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #fdfaf6; }
 
-.floating-bar { position: absolute; left: 0; width: 100%; background: #ffffff; z-index: 50; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 0 10px rgba(0,0,0,0.05); transition: transform 0.3s ease-in-out; }
-#top-bar { top: 0; height: calc(50px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); padding-left: 15px; padding-right: 15px; border-bottom: 1px solid #e0e0e0; }
-#bottom-bar { bottom: 0; height: calc(55px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); padding-left: 20px; padding-right: 20px; gap: 15px; border-top: 1px solid #e0e0e0; }
+/* Barras de Controle com Suporte a Áreas Seguras */
+.floating-bar {
+    position: absolute; left: 0; width: 100%; 
+    background: #ffffff; z-index: 50;
+    display: flex; align-items: center; justify-content: space-between; 
+    box-shadow: 0 0 10px rgba(0,0,0,0.05);
+    transition: transform 0.3s ease-in-out;
+}
 
+#top-bar { 
+    top: 0; 
+    height: calc(50px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+    padding-left: 15px; padding-right: 15px;
+    border-bottom: 1px solid #e0e0e0; 
+}
+
+#bottom-bar { 
+    bottom: 0; 
+    height: calc(55px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: 20px; padding-right: 20px; gap: 15px;
+    border-top: 1px solid #e0e0e0; 
+}
+
+/* Modo imersivo escondendo as barras */
 .ui-hidden #top-bar { transform: translateY(-100%); }
 .ui-hidden #bottom-bar { transform: translateY(100%); }
 
@@ -33,24 +108,27 @@ body { background-color: #f5f5f7; color: #1d1d1f; overflow: hidden; }
 #viewer { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 10; }
 #brightness-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: black; opacity: 0; pointer-events: none; z-index: 15; transition: opacity 0.2s; }
 
+/* Configuração de Zonas de Toque Transparentes */
 #touch-zones { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; z-index: 20; }
 #zone-left { width: 20%; height: 100%; }
 #zone-center { width: 60%; height: 100%; }
 #zone-right { width: 20%; height: 100%; }
 
-/* Modal Aa */
-#settings-modal { position: absolute; top: calc(60px + env(safe-area-inset-top)); right: 15px; width: 320px; background: #ffffff; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 60; padding: 15px; transition: opacity 0.2s ease; }
+/* --- Popover de Configurações Aa --- */
+#settings-modal {
+    position: absolute; 
+    top: calc(60px + env(safe-area-inset-top)); right: 15px; 
+    width: 320px; background: #ffffff; border-radius: 12px; 
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 60; padding: 15px; 
+    transition: opacity 0.2s ease;
+}
 #settings-modal.hidden { display: none; opacity: 0; }
 
 .tabs { display: flex; border-bottom: 1px solid #e0e0e0; margin-bottom: 15px; }
 .tab-btn { flex: 1; background: none; border: none; padding: 10px; font-size: 14px; font-weight: 600; color: #5f6368; cursor: pointer; }
 .tab-btn.active { color: #1a73e8; border-bottom: 2px solid #1a73e8; }
-
 .tab-content { display: none; }
 .tab-content.active { display: block; }
-
-/* Scroll para a aba de texto não estourar a tela */
-.scrollable { max-height: 60vh; overflow-y: auto; padding-right: 5px; scrollbar-width: thin; }
 
 .font-carousel { display: flex; overflow-x: auto; gap: 15px; padding-bottom: 10px; margin-bottom: 15px; scrollbar-width: none; }
 .font-btn { display: flex; flex-direction: column; align-items: center; background: none; border: none; cursor: pointer; min-width: 60px; }
@@ -58,18 +136,10 @@ body { background-color: #f5f5f7; color: #1d1d1f; overflow: hidden; }
 .font-btn.selected .circle { background: #1a73e8; color: white; border-color: #1a73e8; }
 .font-btn span { font-size: 12px; color: #5f6368; }
 
-.divider { border: 0; border-top: 1px solid #e0e0e0; margin: 15px 0; }
-.section-title { font-size: 12px; font-weight: bold; color: #5f6368; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
-
-.controls-row { display: flex; justify-content: space-between; gap: 10px; }
-.btn-group { display: flex; align-items: center; border: 1px solid #dadce0; border-radius: 24px; padding: 2px 5px; background: #fff; }
-.btn-group button { background: none; border: none; width: 36px; height: 36px; font-size: 14px; font-weight: bold; color: #3c4043; cursor: pointer; }
-.btn-group span { font-size: 13px; width: 40px; text-align: center; color: #3c4043; }
-
-#text-align-select { flex: 1; padding: 0 10px; border: 1px solid #dadce0; border-radius: 24px; font-size: 14px; background: white; outline: none; }
-
-.slider-group label { display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 10px; color: #3c4043; font-weight: 500; }
-.slider-group input { width: 65%; accent-color: #1a73e8; }
+.controls-row { display: flex; justify-content: center; gap: 10px; margin-top: 10px; }
+.btn-group { display: flex; align-items: center; border: 1px solid #dadce0; border-radius: 24px; padding: 2px 5px; }
+.btn-group button { background: none; border: none; width: 40px; height: 36px; font-size: 16px; font-weight: bold; color: #3c4043; cursor: pointer; }
+#font-size-display { font-size: 14px; width: 45px; text-align: center; color: #3c4043; }
 
 .brightness-row { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
 .brightness-row input { flex: 1; accent-color: #1a73e8; }
