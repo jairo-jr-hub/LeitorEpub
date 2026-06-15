@@ -7,10 +7,10 @@ const settingsModal = document.getElementById('settings-modal');
 let currentBook = null;
 let rendition = null;
 
-// Configurações persistentes com o tema Sépia ativo por padrão
 let readerSettings = JSON.parse(localStorage.getItem('reader_settings')) || {
     fontSize: 100,
     fontFamily: 'Original',
+    textAlign: 'justify', // Alinhamento salvo
     theme: 'sepia', 
     brightness: 100
 };
@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initUIEvents();
 });
 
-// --- BIBLIOTECA (IndexedDB via LocalForage) ---
+// --- BIBLIOTECA ---
 async function loadLibrary() {
     bookshelf.innerHTML = '';
     const library = await localforage.getItem('library_metadata') || [];
@@ -35,12 +35,11 @@ async function loadLibrary() {
         div.className = 'book-item';
         div.onclick = () => openBook(bookMeta.id);
 
-        // Botão de excluir dinâmico (Três pontinhos)
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
         deleteBtn.innerHTML = '⋮';
         deleteBtn.onclick = async (e) => {
-            e.stopPropagation(); // Impede de abrir o livro ao tentar deletar
+            e.stopPropagation();
             if (confirm(`Excluir permanentemente o livro "${bookMeta.title}" do leitor?`)) {
                 await localforage.removeItem(bookMeta.id);
                 const novaBiblioteca = library.filter(b => b.id !== bookMeta.id);
@@ -106,12 +105,10 @@ fileInput.addEventListener('change', async (e) => {
     }
 });
 
-// --- EXECUÇÃO DO LEITOR (Injeções Estáveis e Filtragem de Notch/Dynamic Island) ---
+// --- RENDERIZAÇÃO DO LIVRO ---
 async function openBook(bookId) {
     libraryView.style.display = 'none';
     readerView.style.display = 'block';
-    
-    // Inicia no modo tela cheia puro
     readerView.classList.add('ui-hidden');
     settingsModal.classList.add('hidden');
 
@@ -127,20 +124,20 @@ async function openBook(bookId) {
             flow: 'paginated'
         });
 
-        // Configuração dos Temas com injeção prioritária (!important)
+        // Configuração dos Temas com cores mais fortes (Inspirado no Play Livros)
         rendition.themes.register("light", { "body": { "background": "#ffffff !important", "color": "#000000 !important" }});
-        rendition.themes.register("sepia", { "body": { "background": "#fdfaf6 !important", "color": "#4b3d32 !important" }});
+        // Sépia ajustado: fundo mais creme (#f4ecd8) e fonte um marrom bem escuro/forte (#26180f)
+        rendition.themes.register("sepia", { "body": { "background": "#f4ecd8 !important", "color": "#26180f !important" }});
         rendition.themes.register("dark", { "body": { "background": "#121212 !important", "color": "#e0e0e0 !important" }});
         
         rendition.themes.select(readerSettings.theme);
         rendition.themes.fontSize(readerSettings.fontSize + "%");
         if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
 
-        // Injeção de Estilos Dinâmicos respeitando as margens e a safe-area do iPhone
         rendition.hooks.content.register((contents) => {
             const style = contents.document.createElement('style');
             style.id = 'epub-dynamic-styles';
-            // Injeta padding de área segura e fixa o texto como Justificado
+            // Injeção limpa de alinhamento reativo
             style.innerHTML = `
                 body {
                     padding: calc(20px + env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom)) 20px !important; 
@@ -148,7 +145,7 @@ async function openBook(bookId) {
                     background-color: transparent !important;
                 }
                 body, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
-                    text-align: justify !important; /* Sempre justificado, como solicitado */
+                    text-align: ${readerSettings.textAlign} !important;
                 }
             `;
             contents.document.head.appendChild(style);
@@ -159,14 +156,12 @@ async function openBook(bookId) {
         const library = await localforage.getItem('library_metadata');
         const bookMeta = library.find(b => b.id === bookId);
         
-        // Exibe o livro sem travar a thread principal
         if (bookMeta && bookMeta.cfi) {
             try { await rendition.display(bookMeta.cfi); } catch(e) { await rendition.display(); }
         } else {
             await rendition.display();
         }
 
-        // Paginação gerada de forma assíncrona em segundo plano (Previne tela branca)
         currentBook.ready.then(() => {
             return currentBook.locations.generate(1600);
         }).then(() => {
@@ -202,20 +197,17 @@ function fecharLivro() {
     readerView.style.display = 'none';
     libraryView.style.display = 'block';
     
-    // Reseta a cor de status bar para o padrão claro ao sair do leitor
     const meta = document.getElementById('theme-color-meta');
     if (meta) meta.setAttribute('content', '#ffffff');
 }
 
-// --- INTERAÇÕES VISUAIS DA INTERFACE ---
+// --- INTERAÇÕES DA UI ---
 function initUIEvents() {
-    // Ações das Zonas de Toque Laterais e Central
     document.getElementById('zone-left').addEventListener('click', () => { if (rendition) rendition.prev(); fecharMenus(); });
     document.getElementById('zone-right').addEventListener('click', () => { if (rendition) rendition.next(); fecharMenus(); });
     
     document.getElementById('zone-center').addEventListener('click', () => {
-        const isHidden = readerView.classList.contains('ui-hidden');
-        if (isHidden) { readerView.classList.remove('ui-hidden'); } 
+        if (readerView.classList.contains('ui-hidden')) { readerView.classList.remove('ui-hidden'); } 
         else { fecharMenus(); }
     });
 
@@ -227,7 +219,6 @@ function initUIEvents() {
         settingsModal.classList.add('hidden');
     }
 
-    // Gerenciador de Abas do Menu Flutuante
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -237,7 +228,6 @@ function initUIEvents() {
         });
     });
 
-    // Alteração de Tipografia
     document.querySelectorAll('.font-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             readerSettings.fontFamily = e.currentTarget.dataset.font;
@@ -248,7 +238,13 @@ function initUIEvents() {
     document.getElementById('btn-font-plus').addEventListener('click', () => { readerSettings.fontSize += 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
     document.getElementById('btn-font-minus').addEventListener('click', () => { if(readerSettings.fontSize > 50) readerSettings.fontSize -= 10; aplicarConfiguracoesDinamicas(); atualizarUI(); salvarConfig(); });
 
-    // Alternador de Temas e Brilho
+    // Evento de Alinhamento
+    document.getElementById('text-align-select').addEventListener('change', (e) => {
+        readerSettings.textAlign = e.target.value;
+        atualizarStylesInjetados();
+        salvarConfig();
+    });
+
     document.querySelectorAll('.theme-color-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             readerSettings.theme = e.target.dataset.theme;
@@ -262,17 +258,15 @@ function initUIEvents() {
     atualizarUI(); 
 }
 
-// --- ROTINAS REATIVAS (Aplicações em tempo de execução) ---
 function salvarConfig() { localStorage.setItem('reader_settings', JSON.stringify(readerSettings)); }
 
-// Função simplificada e robusta para atualizar a UI e o theme-color do navegador
 function aplicarConfiguracoesDinamicas() {
     if (!rendition) return;
     
     rendition.themes.select(readerSettings.theme);
     
-    // Camuflagem Inteligente do Relógio do iPhone
-    const bgColors = { 'light': '#ffffff', 'sepia': '#fdfaf6', 'dark': '#121212' };
+    // Atualização do fundo camuflado do relógio (Novas Cores)
+    const bgColors = { 'light': '#ffffff', 'sepia': '#f4ecd8', 'dark': '#121212' };
     const currentBgColor = bgColors[readerSettings.theme];
     
     readerView.style.background = currentBgColor;
@@ -280,12 +274,32 @@ function aplicarConfiguracoesDinamicas() {
     const themeColorMeta = document.getElementById('theme-color-meta');
     if (themeColorMeta) themeColorMeta.setAttribute('content', currentBgColor);
 
-    // Fontes
     rendition.themes.fontSize(readerSettings.fontSize + "%");
     if(readerSettings.fontFamily !== 'Original') rendition.themes.font(readerSettings.fontFamily);
     else rendition.themes.font(''); 
 
     aplicarBrilho();
+}
+
+function atualizarStylesInjetados() {
+    if (!rendition) return;
+    try {
+        rendition.getContents().forEach(content => {
+            let style = content.document.getElementById('epub-dynamic-styles');
+            if (style) {
+                style.innerHTML = `
+                    body {
+                        padding: calc(20px + env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom)) 20px !important; 
+                        margin: 0 !important; 
+                        background-color: transparent !important;
+                    }
+                    body, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
+                        text-align: ${readerSettings.textAlign} !important;
+                    }
+                `;
+            }
+        });
+    } catch(e) { console.warn(e); }
 }
 
 function aplicarBrilho() {
@@ -296,6 +310,7 @@ function aplicarBrilho() {
 
 function atualizarUI() {
     document.getElementById('font-size-display').textContent = readerSettings.fontSize + '%';
+    document.getElementById('text-align-select').value = readerSettings.textAlign || 'justify';
     document.getElementById('brightness-slider').value = readerSettings.brightness;
     aplicarBrilho();
     document.querySelectorAll('.font-btn').forEach(btn => { btn.classList.toggle('selected', btn.dataset.font === readerSettings.fontFamily); });
